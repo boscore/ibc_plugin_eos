@@ -1,6 +1,6 @@
 cmake_minimum_required( VERSION 3.5 )
 
-project( EOSIO )
+project( ibc_plugin_eos )
 
 enable_testing()
 
