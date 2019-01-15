@@ -2190,11 +2190,10 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_heartbeat_message &msg) {
       peer_ilog(c, "received ibc_heartbeat_message");
 
-      dlog("msg.origtrxs_table_id_range: [${of},${ot}] msg.cashtrxs_table_seq_num_range: [${cf},${ct}] msg.new_producers_block_num: ${n}",
+      dlog("origtrxs_table_id_range: [${of},${ot}] cashtrxs_table_seq_num_range: [${cf},${ct}] new_producers_block_num: ${n}, lwcls_range: [${lsf},${lst}]",
            ("of",msg.origtrxs_table_id_range.first)("ot",msg.origtrxs_table_id_range.second)
            ("cf",msg.cashtrxs_table_seq_num_range.first)("ct",msg.cashtrxs_table_seq_num_range.second)
-           ("n",msg.new_producers_block_num));
-      // idump((msg.origtrxs_table_id_range)(msg.cashtrxs_table_seq_num_range)(msg.new_producers_block_num));
+           ("n",msg.new_producers_block_num)("lsf",msg.lwcls.first_num)("lst",msg.lwcls.last_num));
 
       // step one: check ibc_chain_state and lwcls
       if ( msg.ibc_chain_state == deployed ) {  // send lwc_init_message
