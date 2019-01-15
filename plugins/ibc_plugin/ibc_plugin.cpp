@@ -58,7 +58,7 @@ namespace eosio { namespace ibc {
 
    // consts
    const static uint32_t MaxSendSectionLength = 30;
-   const static uint32_t MinDepth = 20;   // =12*4+2, never access blocks within this depth
+   const static uint32_t MinDepth = 70;   // =12*4+2, never access blocks within this depth
    const static uint32_t DiffOfTrxBeforeMinDepth = 10;
    const static uint32_t BPScheduleReplaceMinLength = 330;  // important para, 330 > 325, safer
    const static uint32_t BlocksPerSecond = 2;
