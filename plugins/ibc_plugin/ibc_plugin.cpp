@@ -786,7 +786,27 @@ namespace eosio { namespace ibc {
       try {
          auto result = my_impl->chain_plug->get_read_only_api().get_table_rows( par );
          if ( result.rows.size() != 0 ){
-            return result.rows.front().as<block_header_state_type>();
+            auto ret = result.rows[0];
+            block_header_state_type bhs;
+            bhs.block_num                 = ret["block_num"].as<uint64_t>();
+            bhs.block_id                  = ret["block_id"].as<block_id_type>();
+
+            bhs.header.timestamp    		= ret["header"]["timestamp"].as<block_timestamp_type>();
+            bhs.header.producer    			= ret["header"]["producer"].as<account_name>();
+            bhs.header.confirmed    		= ret["header"]["confirmed"].as<uint16_t>();
+            bhs.header.previous    			= ret["header"]["previous"].as<block_id_type>();
+            bhs.header.transaction_mroot	= ret["header"]["transaction_mroot"].as<checksum256_type>();
+            bhs.header.action_mroot    	= ret["header"]["action_mroot"].as<checksum256_type>();
+            bhs.header.schedule_version   = ret["header"]["schedule_version"].as<uint32_t>();
+            bhs.header.new_producers    	= ret["header"]["new_producers"].as<optional<producer_schedule_type>>();
+            /*bhs.header.header_extensions  = ret["header"]["header_extensions"].as<extensions_type>();*/ // a bug here
+            bhs.header.producer_signature = ret["header"]["producer_signature"].as<signature_type>();
+
+            bhs.active_schedule_id  = ret["active_schedule_id"].as<uint32_t>();
+            bhs.pending_schedule_id = ret["pending_schedule_id"].as<uint32_t>();
+            bhs.blockroot_merkle    = ret["blockroot_merkle"].as<incremental_merkle>();
+            bhs.block_signing_key   = ret["block_signing_key"].as<public_key_type>();
+            return bhs;
          }
       } FC_LOG_AND_DROP()
       return optional<block_header_state_type>();
