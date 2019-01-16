@@ -1679,6 +1679,14 @@ namespace eosio { namespace ibc {
 
    bool connection::process_next_message(ibc_plugin_impl& impl, uint32_t message_length) {
       try {
+         auto index = pending_message_buffer.read_index();
+         uint64_t which = 0; char b = 0; uint8_t by = 0;
+         do {
+            pending_message_buffer.peek(&b, 1, index);
+            which |= uint32_t(uint8_t(b) & 0x7f) << by;
+            by += 7;
+         } while( uint8_t(b) & 0x80 && by < 32);
+
          auto ds = pending_message_buffer.create_datastream();
          ibc_message msg;
          fc::raw::unpack(ds, msg);
