@@ -1401,10 +1401,10 @@ namespace eosio { namespace ibc {
             try {
                result.get<fc::exception_ptr>()->dynamic_rethrow_exception();
             } FC_LOG_AND_DROP()
-            ilog("push rollback transaction failed, index ${idx}", ("idx", index));
+            elog("push rollback transaction failed, index ${idx}", ("idx", index));
          } else {
             auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
-            ilog("pushed rollback transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
+            dlog("pushed rollback transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
          }
 
          int next_index = index + 1;
@@ -2590,9 +2590,10 @@ namespace eosio { namespace ibc {
                   local_origtrxs.insert(trx_info);
                } else {
                   peer_elog(c,"received unlinkable trxs_rich_info table: origtrxs, table_id: ${tb_id}, trx_id: ${trx_id}",("tb_id",trx_info.table_id)("trx_id",trx_info.trx_id));
+                  local_origtrxs.insert(trx_info); // add it still
                }
             } else {
-               if ( it->trx_id == trx_info.trx_id ){
+               if ( it->trx_id == trx_info.trx_id ){ // duplicate
                   break;
                } else { // replace
                   local_origtrxs.erase( it );
@@ -2622,6 +2623,7 @@ namespace eosio { namespace ibc {
                   local_cashtrxs.insert(trx_info);
                } else {
                   peer_elog(c,"received unlinkable trxs_rich_info table: cashtrxs, table_id: ${tb_id}, trx_id: ${trx_id}",("tb_id",trx_info.table_id)("trx_id",trx_info.trx_id));
+                  local_cashtrxs.insert(trx_info); // add it still
                }
             } else {
                if ( it->trx_id == trx_info.trx_id ){
@@ -3014,7 +3016,7 @@ namespace eosio { namespace ibc {
          cash_begin = local_cashtrxs.begin()->table_id;
          cash_end = local_cashtrxs.rbegin()->table_id;
       }
-      // ilog("local_origtrxs id range [${of} - ${ot}], local_cashtrxs id range [${cf} - ${ct}]",("of",orig_begin)("ot",orig_end)("cf",cash_begin)("ct",cash_end));
+      dlog("local_origtrxs id range [${of},${ot}], local_cashtrxs id range [${cf},${ct}]",("of",orig_begin)("ot",orig_end)("cf",cash_begin)("ct",cash_end));
 
 
       if ( chain_contract->state != working || token_contract->state != working ){
