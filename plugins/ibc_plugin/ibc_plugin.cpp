@@ -1943,7 +1943,9 @@ namespace eosio { namespace ibc {
                                           } else {
                                              ilog( "Peer ${p} closed connection",("p",pname) );
                                           }
-                                          close( conn );
+                                          /* close( conn ); */
+                                          conn->write_queue.clear();
+                                          conn->out_queue.clear();
                                        }
                                     }
                                     catch(const std::exception &ex) {
@@ -2022,7 +2024,7 @@ namespace eosio { namespace ibc {
       brtm.merkle = block->blockroot_merkle;
 
       blockroot_merkle_cache.push_back( brtm );
-      if ( blockroot_merkle_cache.size() > 3600*BlocksPerSecond*24 ){ // one day
+      if ( blockroot_merkle_cache.size() > 3600*BlocksPerSecond*24*7 ){ // one week
          blockroot_merkle_cache.erase( blockroot_merkle_cache.begin() );
       }
 
@@ -3107,16 +3109,20 @@ namespace eosio { namespace ibc {
             auto it = local_origtrxs.project<0>(it_trx_id);
             if ( it != local_origtrxs.end() ){
                ++it;
-               while ( it != local_origtrxs.end() && lwcls.first <= it->block_num && it->block_num <= lib_num ){
-                  orig_trxs_to_push.push_back( *it );
+               while ( it != local_origtrxs.end() ){
+                  if ( lwcls.first <= it->block_num && it->block_num <= lib_num ){
+                     orig_trxs_to_push.push_back( *it );
+                  }
                   ++it;
                }
             } else { // maybe happen when restart ibc_plugin node
                wlog("can not find original transacton infomation form local_origtrxs, restart nodeos?");
                auto it_blk_num = local_origtrxs.get<by_block_num>().lower_bound( cash_opt->orig_trx_block_num + 1 );
                it = local_origtrxs.project<0>(it_blk_num);
-               while ( it != local_origtrxs.end() && lwcls.first <= it->block_num && it->block_num <= lib_num ){
-                  orig_trxs_to_push.push_back( *it );
+               while ( it != local_origtrxs.end() ){
+                  if ( lwcls.first <= it->block_num && it->block_num <= lib_num ){
+                     orig_trxs_to_push.push_back( *it );
+                  }
                   ++it;
                }
             }
