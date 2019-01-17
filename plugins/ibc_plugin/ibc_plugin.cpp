@@ -2397,7 +2397,7 @@ namespace eosio { namespace ibc {
 
                ilog("find block ${b} with fit blockroot_merkle",("b",walk_point.block_num));
 
-               static const uint32_t max_interval_blocks = BlocksPerSecond * 3600; // 1 hours
+               static const uint32_t max_interval_blocks = BlocksPerSecond * 3600 * 24 ; // 1 hours * 24
                if ( check_num - walk_point.block_num <= max_interval_blocks ){
                   while( walk_point.block_num < check_num ){
                      walk_point.merkle.append( chain_plug->chain().get_block_id_for_num( walk_point.block_num ) );
@@ -2922,9 +2922,7 @@ namespace eosio { namespace ibc {
          transaction_id_type check_trx_id = transaction_id_type();
          try {
             check_trx_id = trx.trx.get<packed_transaction>().id();
-         } catch (...) {
-            continue;
-         }
+         } catch (...) {}
 
          if ( check_trx_id == trx_id ){
             found = true;
