@@ -2200,7 +2200,7 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_heartbeat_message &msg) {
       peer_ilog(c, "received ibc_heartbeat_message");
 
-      dlog("origtrxs_table_id_range: [${of},${ot}] cashtrxs_table_seq_num_range: [${cf},${ct}] new_producers_block_num: ${n}, lwcls_range: [${lsf},${lst}]",
+      ilog("received msg: origtrxs_table_id_range [${of},${ot}] cashtrxs_table_seq_num_range [${cf},${ct}] new_producers_block_num ${n}, lwcls_range [${lsf},${lst}]",
            ("of",msg.origtrxs_table_id_range.first)("ot",msg.origtrxs_table_id_range.second)
            ("cf",msg.cashtrxs_table_seq_num_range.first)("ct",msg.cashtrxs_table_seq_num_range.second)
            ("n",msg.new_producers_block_num)("lsf",msg.lwcls.first_num)("lst",msg.lwcls.last_num));
@@ -2803,7 +2803,12 @@ namespace eosio { namespace ibc {
             for( auto &c : connections) {
                if( c->current() ) {
                   peer_ilog(c,"sending ibc_heartbeat_message");
-                  //idump((msg.origtrxs_table_id_range)(msg.cashtrxs_table_seq_num_range)(msg.lwcls));
+
+                  dlog("origtrxs_table_id_range [${of},${ot}] cashtrxs_table_seq_num_range [${cf},${ct}] new_producers_block_num ${n}, lwcls_range [${lsf},${lst},${v}]",
+                       ("of",msg.origtrxs_table_id_range.first)("ot",msg.origtrxs_table_id_range.second)
+                       ("cf",msg.cashtrxs_table_seq_num_range.first)("ct",msg.cashtrxs_table_seq_num_range.second)
+                       ("n",msg.new_producers_block_num)("lsf",msg.lwcls.first_num)("lst",msg.lwcls.last_num)("v",msg.lwcls.valid));
+
                   c->enqueue( msg );
                }
             }
@@ -3006,6 +3011,12 @@ namespace eosio { namespace ibc {
 
    void ibc_plugin_impl::ibc_core_checker( ){
 
+      if ( chain_contract->state != working || token_contract->state != working ){
+         chain_contract->get_contract_state();
+         token_contract->get_contract_state();
+         return;
+      }
+
       // dump debug info
       uint32_t orig_begin = 0, orig_end = 0, cash_begin = 0, cash_end = 0;
       if( local_origtrxs.begin() != local_origtrxs.end() ){
@@ -3016,14 +3027,7 @@ namespace eosio { namespace ibc {
          cash_begin = local_cashtrxs.begin()->table_id;
          cash_end = local_cashtrxs.rbegin()->table_id;
       }
-      dlog("local_origtrxs id range [${of},${ot}], local_cashtrxs id range [${cf},${ct}]",("of",orig_begin)("ot",orig_end)("cf",cash_begin)("ct",cash_end));
-
-
-      if ( chain_contract->state != working || token_contract->state != working ){
-         chain_contract->get_contract_state();
-         token_contract->get_contract_state();
-         return;
-      }
+      ilog("local_origtrxs id range [${of},${ot}], local_cashtrxs id range [${cf},${ct}]",("of",orig_begin)("ot",orig_end)("cf",cash_begin)("ct",cash_end));
 
       ///< ---- step zero: remove side effect of unapplied trxs ---- >///
       chain_plug->chain().abort_block();
@@ -3118,7 +3122,7 @@ namespace eosio { namespace ibc {
                   ++it;
                }
             } else { // maybe happen when restart ibc_plugin node
-               wlog("can not find original transacton infomation form local_origtrxs, restart nodeos?");
+               wlog("can not find original transacton infomation form local_origtrxs, is nodeos restarted ?");
                auto it_blk_num = local_origtrxs.get<by_block_num>().lower_bound( cash_opt->orig_trx_block_num + 1 );
                it = local_origtrxs.project<0>(it_blk_num);
                while ( it != local_origtrxs.end() ){
