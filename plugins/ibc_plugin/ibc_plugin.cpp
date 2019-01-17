@@ -2918,7 +2918,15 @@ namespace eosio { namespace ibc {
       uint32_t found_num = 0;
       for ( auto const& trx : blk_ptr->transactions ){
          trx_digests.push_back( trx.digest() );
-         if ( trx.trx.get<packed_transaction>().id() == trx_id ){
+
+         transaction_id_type check_trx_id = transaction_id_type();
+         try {
+            check_trx_id = trx.trx.get<packed_transaction>().id();
+         } catch (...) {
+            continue;
+         }
+
+         if ( check_trx_id == trx_id ){
             found = true;
             packed_trx_receipt = fc::raw::pack(trx);
          }
