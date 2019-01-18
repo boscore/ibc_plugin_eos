@@ -3176,14 +3176,6 @@ namespace eosio { namespace ibc {
       uint32_t next_cash_seq_num = last_cash_seq_num + 1;
       auto it = local_cashtrxs.get<by_id>().find( next_cash_seq_num );
 
-      if ( it->block_num < lwcls.first ){
-         // The contract can validate trx with the previous section, not only the lwcls, which may save such a serious error.
-         // so don't return here, just print error.
-         // this may be caused by start a new relay-relay channel when other relay-relay channel is working and
-         // the new channel start a new section because no previous data was obtained
-         elog("============== fatal error: it->block_num < lwcls.first ==============");
-      }
-
       if ( it == local_cashtrxs.end() ){
          auto it_up = local_cashtrxs.get<by_id>().upper_bound( next_cash_seq_num );
          if ( it_up != local_cashtrxs.end() ){
@@ -3192,6 +3184,14 @@ namespace eosio { namespace ibc {
             // this may be caused by start a new relay-relay channel when other relay-relay channel is working
             return;  // important!
          }
+      }
+
+      if ( it != local_cashtrxs.end() && it->block_num < lwcls.first ){
+         // The contract can validate trx with the previous section, not only the lwcls, which may save such a serious error.
+         // so don't return here, just print error.
+         // this may be caused by start a new relay-relay channel when other relay-relay channel is working and
+         // the new channel start a new section because no previous data was obtained
+         elog("============== fatal error: it->block_num < lwcls.first ==============");
       }
 
       while ( it != local_cashtrxs.end() && it->block_num <= lib_num ){
