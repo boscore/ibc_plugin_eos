@@ -58,8 +58,8 @@ namespace eosio { namespace ibc {
 
    // consts
    const static uint32_t MaxSendSectionLength = 30;
-   const static uint32_t MinDepth = 70;   // =12*4+2, never access blocks within this depth
-   const static uint32_t DiffOfTrxBeforeMinDepth = 10;
+   const static uint32_t MinDepth = 325;   // never access blocks within this depth
+   const static uint32_t DiffOfTrxBeforeMinDepth = 20;
    const static uint32_t BPScheduleReplaceMinLength = 330;  // important para, 330 > 325, safer
    const static uint32_t BlocksPerSecond = 2;
    const static uint32_t MaxLocalOrigtrxsCache = 100*1000;
@@ -3182,16 +3182,20 @@ namespace eosio { namespace ibc {
             // cashconfirm action can't jump, must push according to the serial number
             // so, return directly here
             // this may be caused by start a new relay-relay channel when other relay-relay channel is working
+            wlog("============= cashconfirm action can't jump, return directly =============");
             return;  // important!
          }
       }
 
+      bool return_after_this_step = false;
       if ( it != local_cashtrxs.end() && it->block_num < lwcls.first ){
          // The contract can validate trx with the previous section, not only the lwcls, which may save such a serious error.
          // so don't return here, just print error.
          // this may be caused by start a new relay-relay channel when other relay-relay channel is working and
          // the new channel start a new section because no previous data was obtained
          elog("============== fatal error: it->block_num < lwcls.first ==============");
+         edump((*it)( lwcls.first)( lwcls.last));
+         return_after_this_step = true;
       }
 
       while ( it != local_cashtrxs.end() && it->block_num <= lib_num ){
@@ -3208,6 +3212,11 @@ namespace eosio { namespace ibc {
          }
          ilog("---------cash_trxs_to_push to push size ${n}",("n",to_push.size()));
          token_contract->push_cashconfirm_trxs( to_push, last_cash_seq_num + 1 );
+         return;
+      }
+
+      if ( return_after_this_step ){
+         return;
       }
 
 
