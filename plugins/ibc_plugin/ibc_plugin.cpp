@@ -2793,27 +2793,27 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::start_ibc_heartbeat_timer() {
 
       if ( count_open_sockets() != 0 ){
+         try{
+            if ( should_send_ibc_heartbeat() ){
+               ibc_heartbeat_message msg;
+               chain_checker(msg);
+               ibc_chain_contract_checker(msg);
+               ibc_token_contract_checker(msg);
 
-         if ( should_send_ibc_heartbeat() ){
-            ibc_heartbeat_message msg;
-            chain_checker(msg);
-            ibc_chain_contract_checker(msg);
-            ibc_token_contract_checker(msg);
+               for( auto &c : connections) {
+                  if( c->current() ) {
+                     peer_ilog(c,"sending ibc_heartbeat_message");
 
-            for( auto &c : connections) {
-               if( c->current() ) {
-                  peer_ilog(c,"sending ibc_heartbeat_message");
+                     dlog("origtrxs_table_id_range [${of},${ot}] cashtrxs_table_seq_num_range [${cf},${ct}] new_producers_block_num ${n}, lwcls_range [${lsf},${lst},${v}]",
+                          ("of",msg.origtrxs_table_id_range.first)("ot",msg.origtrxs_table_id_range.second)
+                             ("cf",msg.cashtrxs_table_seq_num_range.first)("ct",msg.cashtrxs_table_seq_num_range.second)
+                             ("n",msg.new_producers_block_num)("lsf",msg.lwcls.first_num)("lst",msg.lwcls.last_num)("v",msg.lwcls.valid));
 
-                  dlog("origtrxs_table_id_range [${of},${ot}] cashtrxs_table_seq_num_range [${cf},${ct}] new_producers_block_num ${n}, lwcls_range [${lsf},${lst},${v}]",
-                       ("of",msg.origtrxs_table_id_range.first)("ot",msg.origtrxs_table_id_range.second)
-                       ("cf",msg.cashtrxs_table_seq_num_range.first)("ct",msg.cashtrxs_table_seq_num_range.second)
-                       ("n",msg.new_producers_block_num)("lsf",msg.lwcls.first_num)("lst",msg.lwcls.last_num)("v",msg.lwcls.valid));
-
-                  c->enqueue( msg );
+                     c->enqueue( msg );
+                  }
                }
             }
-         }
-
+         } FC_LOG_AND_DROP()
       } else {
          elog("count_open_sockets() == 0");
       }
@@ -2986,7 +2986,7 @@ namespace eosio { namespace ibc {
       std::vector<transaction_id_type> to_rmunablerb;
       std::vector<transaction_id_type> to_rollback;
 
-      for ( uint64_t i = range.first; i < range.second ; ++i ){
+      for ( uint64_t i = range.first; i <= range.second ; ++i ){
          auto trx_opt = token_contract->get_table_origtrxs_trx_info_by_id( i );
          if ( trx_opt.valid() ){
             if ( trx_opt->block_time_slot + 105 < last_finished_trx_block_time_slot ){
@@ -3057,6 +3057,7 @@ namespace eosio { namespace ibc {
          min_last_num = std::max( min_last_num, uint32_t( lwcls.np_num + BPScheduleReplaceMinLength + chain_contract->lwc_lib_depth) );
       }
 
+      ///< --- local_origtrxs --- >///
       auto _it_orig = local_origtrxs.get<by_block_num>().lower_bound( lwcls.first );
       auto it_orig = local_origtrxs.project<0>(_it_orig);
       while ( it_orig != local_origtrxs.end() && it_orig->block_num < min_last_num ){
@@ -3064,6 +3065,7 @@ namespace eosio { namespace ibc {
          ++it_orig;
       }
 
+      ///< --- local_cashtrxs --- >///
       auto _it_cash = local_cashtrxs.get<by_block_num>().lower_bound( lwcls.first );
       auto it_cash = local_cashtrxs.project<0>(_it_cash);
       while ( it_cash != local_cashtrxs.end() && it_cash->block_num < min_last_num ){
@@ -3171,8 +3173,28 @@ namespace eosio { namespace ibc {
          return;
       }
       uint32_t last_cash_seq_num = gm_opt->cash_seq_num;
-      auto it = local_cashtrxs.get<by_id>().find( last_cash_seq_num + 1 );
-      while ( it != local_cashtrxs.end() && lwcls.first <= it->block_num && it->block_num <= lib_num ){
+      uint32_t next_cash_seq_num = last_cash_seq_num + 1;
+      auto it = local_cashtrxs.get<by_id>().find( next_cash_seq_num );
+
+      if ( it->block_num < lwcls.first ){
+         // The contract can validate trx with the previous section, not only the lwcls, which may save such a serious error.
+         // so don't return here, just print error.
+         // this may be caused by start a new relay-relay channel when other relay-relay channel is working and
+         // the new channel start a new section because no previous data was obtained
+         elog("============== fatal error: it->block_num < lwcls.first ==============");
+      }
+
+      if ( it == local_cashtrxs.end() ){
+         auto it_up = local_cashtrxs.get<by_id>().upper_bound( next_cash_seq_num );
+         if ( it_up != local_cashtrxs.end() ){
+            // cashconfirm action can't jump, must push according to the serial number
+            // so, return directly here
+            // this may be caused by start a new relay-relay channel when other relay-relay channel is working
+            return;  // important!
+         }
+      }
+
+      while ( it != local_cashtrxs.end() && it->block_num <= lib_num ){
          cash_trxs_to_push.push_back( *it );
          ++it;
       }
@@ -3280,15 +3302,18 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::start_ibc_core_timer( ){
-      if ( count_open_sockets() != 0 ){
 
-         // this is used for let ibc_heartbeat_timer work and exchange basic infomation first.
-         static int i = 0;
-         if ( i < 3 ){ ++i; }
-         if ( i >= 3 ){
-            ibc_core_checker();
-         }
+      static int i = 0;
+      if ( count_open_sockets() != 0 ){
+         try {
+            // this is used for let ibc_heartbeat_timer work and exchange basic infomation first.
+            if ( i < 3 ){ ++i; }
+            if ( i >= 5 ){
+               ibc_core_checker();
+            }
+         } FC_LOG_AND_DROP()
       } else {
+         i = 0;
          elog("count_open_sockets() == 0");
       }
 
