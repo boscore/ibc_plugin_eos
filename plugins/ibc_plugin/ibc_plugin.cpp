@@ -3307,12 +3307,14 @@ namespace eosio { namespace ibc {
       if ( count_open_sockets() != 0 ){
          try {
             // this is used for let ibc_heartbeat_timer work and exchange basic infomation first.
-            if ( i < 3 ){ ++i; }
-            if ( i >= 5 ){
+            if ( i < 5 ){
+               ++i;
+            } else {
                ibc_core_checker();
             }
          } FC_LOG_AND_DROP()
       } else {
+         // when reconnect with peer plugin node
          i = 0;
          elog("count_open_sockets() == 0");
       }
