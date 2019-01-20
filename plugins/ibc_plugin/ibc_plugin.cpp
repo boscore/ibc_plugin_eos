@@ -1189,14 +1189,14 @@ namespace eosio { namespace ibc {
             try {
                result.get<fc::exception_ptr>()->dynamic_rethrow_exception();
             } FC_LOG_AND_DROP()
-            elog("push cash transaction failed, index ${i}",("i",index));
+            elog("push cash transaction failed, orig_trx_id ${id}, index ${i}",("id", params->at(index).orig_trx_id)("i",index));
          } else {
             auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
             dlog("pushed cash transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
             next_seq_num += 1;
          }
 
-         last_origtrx_pushed = params->at(index).orig_trx_id;
+         last_origtrx_pushed = params->at(index).orig_trx_id; // used to push failed cash transactions a certain number of times
          int next_index = index + 1;
          if (next_index < params->size()) {
             push_cash_recurse( next_index, params, next_seq_num );
@@ -1278,7 +1278,7 @@ namespace eosio { namespace ibc {
             try {
                result.get<fc::exception_ptr>()->dynamic_rethrow_exception();
             } FC_LOG_AND_DROP()
-            elog("push cashconfirm transaction failed, ${s} succeed, ${l} left",("s",index)("l",params->size() - index));
+            elog("push cashconfirm transaction failed, cash_trx_id: ${id}, ${s} succeed, ${l} left",("id",params->at(index).cash_trx_id)("s",index)("l",params->size() - index));
             return;
          } else {
             auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
@@ -2028,7 +2028,7 @@ namespace eosio { namespace ibc {
          blockroot_merkle_cache.erase( blockroot_merkle_cache.begin() );
       }
 
-      static constexpr uint32_t range = 1 << 10; // 1024
+      static constexpr uint32_t range = ( 1 << 10 ) * 4; // about 30 minutes
       if ( block->block_num % range == 0 ){
          ilog("push block ${n}'s block_merkle to chain contract",("n",block->block_num ));
          blockroot_merkle_type par;
@@ -2989,12 +2989,12 @@ namespace eosio { namespace ibc {
       for ( uint64_t i = range.first; i <= range.second ; ++i ){
          auto trx_opt = token_contract->get_table_origtrxs_trx_info_by_id( i );
          if ( trx_opt.valid() ){
-            if ( trx_opt->block_time_slot + 105 < last_finished_trx_block_time_slot ){
+            if ( trx_opt->block_time_slot +  3600 * 24 * 2 < last_finished_trx_block_time_slot ){
                to_rmunablerb.push_back( trx_opt->trx_id );
                continue;
             }
 
-            if ( trx_opt->block_time_slot + 2 < last_finished_trx_block_time_slot ){
+            if ( trx_opt->block_time_slot + 25 < last_finished_trx_block_time_slot ){
                to_rollback.push_back( trx_opt->trx_id );
             } else {
                break;
@@ -3002,12 +3002,20 @@ namespace eosio { namespace ibc {
          }
       }
 
-      if ( ! to_rmunablerb.empty() ){
-         token_contract->rmunablerb( to_rmunablerb );
-      }
+      static const uint32_t max_push_trxs_per_time = 30;
 
       if ( ! to_rollback.empty() ){
          token_contract->rollback( to_rollback );
+      }
+
+      if ( ! to_rmunablerb.empty() ){
+         std::vector<transaction_id_type> to_push;
+         if ( to_rmunablerb.size() > max_push_trxs_per_time ){
+            to_push = std::vector<transaction_id_type>( to_rmunablerb.begin(), to_rmunablerb.begin() + max_push_trxs_per_time );
+         } else {
+            to_push = to_rmunablerb;
+         }
+         token_contract->rmunablerb( to_push );
       }
    }
 
@@ -3160,7 +3168,7 @@ namespace eosio { namespace ibc {
          } else {
             times += 1;
          }
-         if ( times <= 2 ){
+         if ( times <= 3 ){
             ilog("---------orig_trxs_to_push to push size ${n}, retry times ${try}",("n",to_push.size())("try",times));
             token_contract->push_cash_trxs( to_push, range.second + 1 );
          }
