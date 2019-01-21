@@ -36,7 +36,7 @@ namespace fc {
 
 namespace eosio { namespace ibc {
 
-#define PLUGIN_TEST
+/* #define PLUGIN_TEST */
 
    static appbase::abstract_plugin& _ibc_plugin = app().register_plugin<ibc_plugin>();
 
@@ -478,7 +478,7 @@ namespace eosio { namespace ibc {
 
 
    // ---- contract related consts ----
-   static const uint32_t default_expiration_delta = 30;  ///< 30 seconds
+   static const uint32_t default_expiration_delta = 120;  ///< 120 seconds
    static const fc::microseconds abi_serializer_max_time{500 * 1000}; ///< 500ms
    static const uint32_t  min_lwc_lib_depth = 50;
    static const uint32_t  max_lwc_lib_depth = 400;
@@ -2111,13 +2111,13 @@ namespace eosio { namespace ibc {
             fc_dlog(logger, "skipping duplicate check, addr == ${pa}, id = ${ni}",("pa",c->peer_addr)("ni",c->last_handshake_recv.node_id));
          }
 
-#ifndef PLUGIN_TEST
-         if( msg.chain_id != sidechain_id) {
-            elog( "Peer chain id not correct. Closing connection");
-            c->enqueue( go_away_message(go_away_reason::wrong_chain) );
-            return;
-         }
-#endif
+//#ifndef PLUGIN_TEST
+//         if( msg.chain_id != sidechain_id) {
+//            elog( "Peer chain id not correct. Closing connection");
+//            c->enqueue( go_away_message(go_away_reason::wrong_chain) );
+//            return;
+//         }
+//#endif
          c->protocol_version = msg.network_version;
          if(c->protocol_version != net_version) {
             if (network_version_match) {
@@ -2229,13 +2229,15 @@ namespace eosio { namespace ibc {
             return;
          }
 
+#else
+         block_state_ptr p = cc.fetch_block_state_by_number( head_num );
+#endif
+
          if ( p->pending_schedule.version != p->active_schedule.version ){
             ilog("pending_schedule version not equal to active_schedule version, wait until equal");
             return;
          }
-#else
-         block_state_ptr p = cc.fetch_block_state_by_number( head_num );
-#endif
+
          lwc_init_message msg;
          msg.header = p->header;
          msg.active_schedule = p->active_schedule;
