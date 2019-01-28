@@ -30,7 +30,7 @@ a very deep bug, when encountering some special data structure, the node will cr
 witch dose not call `db.to_variant_with_abi()`.
 
 - special read mode  
-:warning:**The nodeos witch run with ibc_plugin enabled, can neither run as a block producer node nor as a api node**,
+:warning:**The nodeos(build/program/nodeos/nodeos) build by this repository, can neither run as a block producer node nor as a api node**,
 for this node will not accept incomming transactions and the ibc_plugin customized read mode. 
 we add `chain_plug->chain().abort_block()` and `chain_plug->chain().drop_all_unapplied_transactions()` in function
 `ibc_plugin_impl::ibc_core_checker()`, this is very important to ibc_plugin, for ibc_plugin need to push transactions 
