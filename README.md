@@ -1,95 +1,41 @@
 
-# EOSIO - The Most Powerful Infrastructure for Decentralized Applications
+ibc_plugin_eos
+-----
 
-[![Build status](https://badge.buildkite.com/370fe5c79410f7d695e4e34c500b4e86e3ac021c6b1f739e20.svg?branch=master)](https://buildkite.com/EOSIO/eosio)
+Because ibc_plugin is required for each chain and run as a relay node, and because the underlying source code of BOS 
+and EOS is slightly different, a separate plugin repository needs to be maintained for each chain, the plugin 
+repository for eosio is [ibc_plugin_eos](https://github.com/boscore/ibc_plugin_eos), 
+for bos is [ibc_plugin_bos](https://github.com/boscore/ibc_plugin_bos).
+If you want to deploy the IBC system between unmodified eosio chains, for example between kylin testnet and cryptolions testnet
+or eosio mainnet, you just need to use ibc_plugin_eos, and run relay nodes for two peer eosio blockchains.
+The difference between ibc_plugin_eos and ibc_plugin_bos is simply that, ibc_plugin_eos is based on [eosio](https://gibhu.com/EOSIO/eos), 
+ibc_plugin_bos is based on [bos](https://gibhu.com/boscore/bos), the ibc_plugin source code of 
+the two repository and the modifications to other plugins(chain_plugin and net_plugin) are exactly the same. 
+Doing so makes it easier to maintain the source code.
 
-Welcome to the EOSIO source code repository! This software enables businesses to rapidly build and deploy high-performance and high-security blockchain-based applications.
+- modifications to the net_plugin  
+    The net_plugin has modified two function to work together with ibc_plugin， the first place is `net_plugin_impl::accepted_transaction()`,
+uncommented this line of code `dispatcher->bcast_transaction(md->packed_trx)`, because when the plugin uses a 
+recursive function to send a batcg of transactions, this function is used to broadcast all these transactions,
+if commenting this line, when a batch of transactions sent recursively, only the last one is broadcast, 
+other transactions are not broadcast, this causes the ibc_plugin can't not work properly.
+    
+    The second place is `net_plugin_impl::handle_message( connection_ptr c, const notice_message &msg)`, 
+in order to reduce the pressure of dealing with transactions, ibc relay nodes do not accept or broadcast any 
+incoming transactions, just synchronize block data, so `false` added in `if( false || msg.known_trx.pending > 0)`.
 
-Some of the groundbreaking features of EOSIO include:
+- modifications to the chain_plugin  
+    Add a new function `push_transaction_v2`, because `push_transaction` call function `db.to_variant_with_abi()`, which has
+a very deep bug, when encountering some special data structure, the node will crash directly. so a new funciton is added
+witch dose not call `db.to_variant_with_abi()`.
 
-1. Free Rate Limited Transactions 
-1. Low Latency Block confirmation (0.5 seconds)
-1. Low-overhead Byzantine Fault Tolerant Finality
-1. Designed for optional high-overhead, low-latency BFT finality 
-1. Smart contract platform powered by Web Assembly
-1. Designed for Sparse Header Light Client Validation
-1. Scheduled Recurring Transactions 
-1. Time Delay Security
-1. Hierarchical Role Based Permissions
-1. Support for Biometric Hardware Secured Keys (e.g. Apple Secure Enclave)
-1. Designed for Parallel Execution of Context Free Validation Logic
-1. Designed for Inter Blockchain Communication 
+- special read mode  
+:warning:**The nodeos witch run with ibc_plugin enabled, can neither run as a block producer node nor as a api node**,
+for this node will not accept incomming transactions and the ibc_plugin customized read mode. 
+we add `chain_plug->chain().abort_block()` and `chain_plug->chain().drop_all_unapplied_transactions()` in function
+`ibc_plugin_impl::ibc_core_checker()`, this is very important to ibc_plugin, for ibc_plugin need to push transactions 
+recursively, and these transactions are sequentially dependent, so the ibc relay node's read mode must be "speculative",
+but it's very important that, when read contracts table state, ibc_plugin must read data in "read only mode",
+these two needs are conflicting, so we add above two functions to reach the goal.
 
-EOSIO is released under the open source MIT license and is offered “AS IS” without warranty of any kind, express or implied. Any security provided by the EOSIO software depends in part on how it is used, configured, and deployed. EOSIO is built upon many third-party libraries such as Binaryen (Apache License) and WAVM  (BSD 3-clause) which are also provided “AS IS” without warranty of any kind. Without limiting the generality of the foregoing, Block.one makes no representation or guarantee that EOSIO or any third-party libraries will perform as intended or will be free of errors, bugs or faulty code. Both may fail in large or small ways that could completely or partially limit functionality or compromise computer systems. If you use or implement EOSIO, you do so at your own risk. In no event will Block.one be liable to any party for any damages whatsoever, even if it had been advised of the possibility of damage.  
 
-Block.one is neither launching nor operating any initial public blockchains based upon the EOSIO software. This release refers only to version 1.0 of our open source software. We caution those who wish to use blockchains built on EOSIO to carefully vet the companies and organizations launching blockchains based on EOSIO before disclosing any private keys to their derivative software. 
-
-There is no public testnet running currently.
-
-**If you have previously installed EOSIO, please run the `eosio_uninstall` script (it is in the directory where you cloned EOSIO) before downloading and using the binary releases.**
-
-#### Mac OS X Brew Install
-```sh
-$ brew tap eosio/eosio
-$ brew install eosio
-```
-#### Mac OS X Brew Uninstall
-```sh
-$ brew remove eosio
-```
-#### Ubuntu 18.04 Debian Package Install
-```sh
-$ wget https://github.com/eosio/eos/releases/download/v1.5.3/eosio_1.5.3-1-ubuntu-18.04_amd64.deb
-$ sudo apt install ./eosio_1.5.3-1-ubuntu-18.04_amd64.deb
-```
-#### Ubuntu 16.04 Debian Package Install
-```sh
-$ wget https://github.com/eosio/eos/releases/download/v1.5.3/eosio_1.5.3-1-ubuntu-16.04_amd64.deb
-$ sudo apt install ./eosio_1.5.3-1-ubuntu-16.04_amd64.deb
-```
-#### Debian Package Uninstall
-```sh
-$ sudo apt remove eosio
-```
-#### Centos RPM Package Install
-```sh
-$ wget https://github.com/eosio/eos/releases/download/v1.5.3/eosio-1.5.3-1.el7.x86_64.rpm
-$ sudo yum install ./eosio-1.5.3-1.el7.x86_64.rpm
-```
-#### Centos RPM Package Uninstall
-```sh
-$ sudo yum remove eosio.cdt
-```
-#### Fedora RPM Package Install
-```sh
-$ wget https://github.com/eosio/eos/releases/download/v1.5.3/eosio-1.5.3-1.fc27.x86_64.rpm
-$ sudo yum install ./eosio-1.5.3-1.fc27.x86_64.rpm
-```
-#### Fedora RPM Package Uninstall
-```sh
-$ sudo yum remove eosio.cdt
-```
-
-## Supported Operating Systems
-EOSIO currently supports the following operating systems:  
-1. Amazon 2017.09 and higher
-2. Centos 7
-3. Fedora 25 and higher (Fedora 27 recommended)
-4. Mint 18
-5. Ubuntu 16.04 (Ubuntu 16.10 recommended)
-6. Ubuntu 18.04
-7. MacOS Darwin 10.12 and higher (MacOS 10.13.x recommended)
-
-## Resources
-1. [Website](https://eos.io)
-1. [Blog](https://medium.com/eosio)
-1. [Developer Portal](https://developers.eos.io)
-1. [StackExchange for Q&A](https://eosio.stackexchange.com/)
-1. [Community Telegram Group](https://t.me/EOSProject)
-1. [Developer Telegram Group](https://t.me/joinchat/EaEnSUPktgfoI-XPfMYtcQ)
-1. [White Paper](https://github.com/EOSIO/Documentation/blob/master/TechnicalWhitePaper.md)
-1. [Roadmap](https://github.com/EOSIO/Documentation/blob/master/Roadmap.md)
-
-<a name="gettingstarted"></a>
-## Getting Started
-Instructions detailing the process of getting the software, building it, running a simple test network that produces blocks, account creation and uploading a sample contract to the blockchain can be found in [Getting Started](https://developers.eos.io/eosio-nodeos/docs/overview-1) on the [EOSIO Developer Portal](https://developers.eos.io).
