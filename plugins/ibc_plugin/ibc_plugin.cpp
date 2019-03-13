@@ -2305,7 +2305,15 @@ namespace eosio { namespace ibc {
          ibc_trxs_request_message request;
          request.table = N(cashtrxs);
          if (local_cashtrxs.size() == 0) {
-            request.range = msg.cashtrxs_table_seq_num_range;
+
+            auto gm_opt = token_contract->get_global_mutable_singleton();
+            if ( !gm_opt.valid() ){
+               elog("internal error, failed to get global_mutable_singleton");
+               return;
+            }
+
+            request.range.first = gm_opt->cash_seq_num + 1;
+            request.range.second = msg.cashtrxs_table_seq_num_range.second;
          } else if (local_cashtrxs.rbegin()->table_id < msg.cashtrxs_table_seq_num_range.second) {
             request.range.first = local_cashtrxs.rbegin()->table_id + 1;
             request.range.second = msg.cashtrxs_table_seq_num_range.second;
@@ -2537,8 +2545,10 @@ namespace eosio { namespace ibc {
       ibc_trxs_data_message ret_msg;
       ret_msg.table = msg.table;
 
+      static const uint32_t max_responses_per_time = 50;
+
       if ( msg.table == N(origtrxs) ){
-         for( auto id = msg.range.first; id <= msg.range.second; ++id ){
+         for( auto id = msg.range.first; id <= msg.range.second && id <= msg.range.first + max_responses_per_time; ++id ){
             auto p = token_contract->get_table_origtrxs_trx_info_by_id( id );
             if ( p.valid() ){
                original_trx_info trx_info = *p;
@@ -2553,7 +2563,7 @@ namespace eosio { namespace ibc {
          }
 
       } else if ( msg.table == N(cashtrxs) ){
-         for( auto id = msg.range.first; id <= msg.range.second; ++id ){
+         for( auto id = msg.range.first; id <= msg.range.second && id <= msg.range.first + max_responses_per_time; ++id ){
             auto p = token_contract->get_table_cashtrxs_trx_info_by_seq_num( id );
             if ( p.valid() ){
                cash_trx_info trx_info = *p;
