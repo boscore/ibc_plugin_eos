@@ -2812,6 +2812,10 @@ namespace eosio { namespace ibc {
                ibc_chain_contract_checker(msg);
                ibc_token_contract_checker(msg);
 
+               if ( connections.size() == 0 ){
+                  elog("connections.size() == 0");
+               }
+
                for( auto &c : connections) {
                   if( c->current() ) {
                      peer_ilog(c,"sending ibc_heartbeat_message");
@@ -2822,6 +2826,10 @@ namespace eosio { namespace ibc {
                              ("n",msg.new_producers_block_num)("lsf",msg.lwcls.first_num)("lst",msg.lwcls.last_num)("v",msg.lwcls.valid));
 
                      c->enqueue( msg );
+                  } else {
+                     elog( "c->current() is faulse" );
+                     ilog( "close connection" );
+                     close(c);
                   }
                }
             }
