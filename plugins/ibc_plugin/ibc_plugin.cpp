@@ -2028,14 +2028,14 @@ namespace eosio { namespace ibc {
          blockroot_merkle_cache.erase( blockroot_merkle_cache.begin() );
       }
 
-      static constexpr uint32_t range = ( 1 << 10 ) * 4; // about 30 minutes
-      if ( block->block_num % range == 0 ){
-         ilog("push block ${n}'s block_merkle to chain contract",("n",block->block_num ));
-         blockroot_merkle_type par;
-         par.block_num = block->block_num;
-         par.merkle = block->blockroot_merkle;
-         chain_contract->blockmerkle( par );
-      }
+//      static constexpr uint32_t range = ( 1 << 10 ) * 4; // about 30 minutes
+//      if ( block->block_num % range == 0 ){
+//         ilog("push block ${n}'s block_merkle to chain contract",("n",block->block_num ));
+//         blockroot_merkle_type par;
+//         par.block_num = block->block_num;
+//         par.merkle = block->blockroot_merkle;
+//         chain_contract->blockmerkle( par );
+//      }
    }
 
    void ibc_plugin_impl::accepted_confirmation(const header_confirmation& head) {
@@ -2389,39 +2389,42 @@ namespace eosio { namespace ibc {
                ret_msg.blockroot_merkle = mkl;
                ret_msg.headers.push_back( *sbp );
             } else {    // when node restart
-               ilog("didn't find block_state of number ${n} in forkdb, calculate it by known blockroot_merkles",("n",check_num));
-               
-               chain_contract->get_blkrtmkls_tb();
+               ilog("didn't find blockroot_merkle of block ${n} in cache, calculate it by known blockroot_merkles",("n",check_num));
+
                blockroot_merkle_type walk_point;
-
-               for ( auto brtm : chain_contract->history_blockroot_merkles ) {
-                  if ( walk_point.block_num < brtm.block_num && brtm.block_num <= check_num ){
-                     walk_point = brtm;
-                  }
-               }
-
-               if ( walk_point.block_num == 0 ){
-                  elog("can not find fit blockroot_merkle to calculation blockroot_merkle of blcok ${n}", ("n",check_num));
+               walk_point.block_num = start_num - ( start_num % 64 );
+               auto sbp = chain_plug->chain().fetch_block_by_number(walk_point.block_num);
+               if ( sbp == signed_block_ptr() ){
+                  elog("block ${n} not exist", ("n", start_num));
                   return;
                }
-
-               ilog("find block ${b} with fit blockroot_merkle",("b",walk_point.block_num));
-
-               static const uint32_t max_interval_blocks = BlocksPerSecond * 3600 * 24 ; // 1 hours * 24
-               if ( check_num - walk_point.block_num <= max_interval_blocks ){
-                  while( walk_point.block_num < check_num ){
-                     walk_point.merkle.append( chain_plug->chain().get_block_id_for_num( walk_point.block_num ) );
-                     walk_point.block_num += 1;
+               bool has_merkle_extension = false;
+               for( auto& ext : sbp->block_extensions ){
+                  if ( ext.first == 0xF && ext.second.size() > 0 ){
+                     has_merkle_extension = true;
+                     walk_point.merkle = fc::raw::unpack<incremental_merkle>( ext.second );
+                     break;
                   }
-                  if (walk_point.block_num == check_num ){
-                     ret_msg.blockroot_merkle = walk_point.merkle;
-                     ret_msg.headers.push_back( *(chain_plug->chain().fetch_block_by_number(walk_point.block_num)) );
-                  } else {
-                     elog("internal error, calculate blockroot_merkle of block ${n} failed", ("n",check_num));
-                     return;
-                  }
+               }
+
+               if ( ! has_merkle_extension ){
+                  elog("didn't find blockroot_merkle of block ${n} in block_log.dat, can't calculate block ${m}'s blockroot_merkle",("n",walk_point.block_num )("m",check_num));
+                  return;
                } else {
-                  elog("available block are too far apart, check_num ${n1}, start_point_num${n2}",("n1",check_num)("n2",walk_point.block_num));
+                  dlog("calculate block ${n}'s blockroot_merkle from block ${m}",("n",check_num)("m",walk_point.block_num ));
+               }
+
+               uint32_t count = check_num - walk_point.block_num;
+               for( uint32_t i = 0; i < count; ++i ){
+                  walk_point.merkle.append( chain_plug->chain().get_block_id_for_num( walk_point.block_num ) );
+                  walk_point.block_num++;
+               }
+
+               if (walk_point.block_num == check_num ){
+                  ret_msg.blockroot_merkle = walk_point.merkle;
+                  ret_msg.headers.push_back( *(chain_plug->chain().fetch_block_by_number(walk_point.block_num)) );
+               } else {
+                  elog("internal error, calculate blockroot_merkle of block ${n} failed", ("n",check_num));
                   return;
                }
             }
@@ -2661,8 +2664,6 @@ namespace eosio { namespace ibc {
       blockroot_merkle_cache.begin()->block_num <= block_num && block_num <= blockroot_merkle_cache.rbegin()->block_num ){
          return blockroot_merkle_cache[ block_num - blockroot_merkle_cache.begin()->block_num  ].merkle;
       }
-
-
 
       incremental_merkle mkl;
       mkl._node_count = 0;

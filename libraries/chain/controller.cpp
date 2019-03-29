@@ -274,7 +274,11 @@ struct controller_impl {
       db.commit( s->block_num );
 
       if( append_to_blog ) {
-         blog.append(s->block);
+         block_state bs = *s;
+         if ( bs.block_num % 64 == 0 ){
+            bs.block->block_extensions.emplace_back(std::make_pair(0xF,fc::raw::pack(bs.blockroot_merkle))); // used by ibc_plugin
+         }
+         blog.append(bs.block);
       }
 
       const auto& ubi = reversible_blocks.get_index<reversible_block_index,by_num>();
