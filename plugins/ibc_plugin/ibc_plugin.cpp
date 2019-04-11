@@ -950,8 +950,7 @@ namespace eosio { namespace ibc {
 
       memo_info_type info;
 
-      string memo = memo_str;
-      trim( memo );
+      string memo = trim( memo_str );
 
       // --- get receiver ---
       auto pos = memo.find("@");
@@ -959,14 +958,14 @@ namespace eosio { namespace ibc {
          elog("memo format error, didn't find charactor \'@\' in memo");
          return optional<memo_info_type>();
       }
-      
+
       string receiver_str = memo.substr( 0, pos );
-      trim( receiver_str );
+      receiver_str = trim( receiver_str );
       info.receiver = name( receiver_str );
 
       // --- trim ---
       memo = memo.substr( pos + 1 );
-      trim( memo );
+      memo = trim( memo );
 
       // --- get chain name and notes ---
       pos = memo.find(" ");
@@ -976,7 +975,7 @@ namespace eosio { namespace ibc {
       } else {
          info.chain = name( memo.substr(0,pos) );
          info.notes = memo.substr( pos + 1 );
-         trim( info.notes );
+         info.notes = trim( info.notes );
       }
 
       if ( info.receiver == name() ){
@@ -988,7 +987,7 @@ namespace eosio { namespace ibc {
          elog("memo format error, chain not provided in memo");
          return optional<memo_info_type>();
       }
-      
+
       return info;
    }
 
