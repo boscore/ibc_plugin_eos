@@ -2123,6 +2123,10 @@ unapplied_transactions_type& controller::get_unapplied_transactions() {
    return my->unapplied_transactions;
 }
 
+void controller::drop_all_unapplied_transactions() {
+   my->unapplied_transactions.clear();
+}
+
 bool controller::sender_avoids_whitelist_blacklist_enforcement( account_name sender )const {
    return my->sender_avoids_whitelist_blacklist_enforcement( sender );
 }
