@@ -36,8 +36,6 @@ namespace fc {
 
 namespace eosio { namespace ibc {
 
-/* #define PLUGIN_TEST */
-
    static appbase::abstract_plugin& _ibc_plugin = app().register_plugin<ibc_plugin>();
 
    using std::vector;
@@ -2110,13 +2108,13 @@ namespace eosio { namespace ibc {
             fc_dlog(logger, "skipping duplicate check, addr == ${pa}, id = ${ni}",("pa",c->peer_addr)("ni",c->last_handshake_recv.node_id));
          }
 
-//#ifndef PLUGIN_TEST
+
 //         if( msg.chain_id != sidechain_id) {
 //            elog( "Peer chain id not correct. Closing connection");
 //            c->enqueue( go_away_message(go_away_reason::wrong_chain) );
 //            return;
 //         }
-//#endif
+
          c->protocol_version = msg.network_version;
          if(c->protocol_version != net_version) {
             if (network_version_match) {
@@ -2209,28 +2207,28 @@ namespace eosio { namespace ibc {
          controller &cc = chain_plug->chain();
          uint32_t head_num = cc.fork_db_head_block_num();
 
-#ifndef PLUGIN_TEST
          uint32_t depth = 200;
          block_state_ptr p;
-         while ( p == block_state_ptr() && depth >= 25 ){
-            uint32_t check_num = std::max( head_num - depth, uint32_t(1) );
-            p = cc.fetch_block_state_by_number( check_num );
-            if ( p == block_state_ptr() ){
-               ilog("didn't get block_state_ptr of block num: ${n}", ("n", check_num ));
-            }else{
-               break;
+
+         if ( cc.active_producers().producers.size() != 1 ){
+            while ( p == block_state_ptr() && depth >= 25 ){
+               uint32_t check_num = std::max( head_num - depth, uint32_t(1) );
+               p = cc.fetch_block_state_by_number( check_num );
+               if ( p == block_state_ptr() ){
+                  ilog("didn't get block_state_ptr of block num: ${n}", ("n", check_num ));
+               }else{
+                  break;
+               }
+               depth /= 2;
             }
-            depth /= 2;
-         }
 
-         if ( p == block_state_ptr() ){
-            ilog("didn't get any block state finally, wait");
-            return;
+            if ( p == block_state_ptr() ){
+               ilog("didn't get any block state finally, wait");
+               return;
+            }
+         } else {
+            p = cc.fetch_block_state_by_number( head_num );
          }
-
-#else
-         block_state_ptr p = cc.fetch_block_state_by_number( head_num );
-#endif
 
          if ( p->pending_schedule.version != p->active_schedule.version ){
             ilog("pending_schedule version not equal to active_schedule version, wait until equal");
