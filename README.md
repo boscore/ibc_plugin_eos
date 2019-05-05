@@ -37,5 +37,3 @@ we add `chain_plug->chain().abort_block()` and `chain_plug->chain().drop_all_una
 recursively, and these transactions are sequentially dependent, so the ibc relay node's read mode must be "speculative",
 but it's very important that, when read contracts table state, ibc_plugin must read data in "read only mode",
 these two needs are conflicting, so we add above two functions to reach the goal.
-
-
