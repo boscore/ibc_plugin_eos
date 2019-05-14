@@ -101,8 +101,6 @@ namespace eosio { namespace ibc {
       uint32_t          cache_cashtrxs_table_records;
       uint32_t          max_original_trxs_per_block;
       bool              active;
-      uint32_t          lock_start_time;
-      uint32_t          lock_minutes;
    };
 
    struct global_mutable_ibc_token {
@@ -168,7 +166,7 @@ FC_REFLECT( eosio::ibc::blockroot_merkle_type, (block_num)(merkle) )
 
 FC_REFLECT( eosio::ibc::transfer_action_type, (from)(to)(quantity)(memo) )
 FC_REFLECT( eosio::ibc::transfer_action_info, (contract)(from)(quantity) )
-FC_REFLECT( eosio::ibc::global_state_ibc_token, (ibc_contract)(peerchain_name)(peerchain_ibc_token_contract)(max_origtrxs_table_records)(cache_cashtrxs_table_records)(max_original_trxs_per_block)(active)(lock_start_time)(lock_minutes) )
+FC_REFLECT( eosio::ibc::global_state_ibc_token, (ibc_contract)(peerchain_name)(peerchain_ibc_token_contract)(max_origtrxs_table_records)(cache_cashtrxs_table_records)(max_original_trxs_per_block)(active) )
 FC_REFLECT( eosio::ibc::global_mutable_ibc_token, (cash_seq_num)(last_finished_trx_block_time_slot)(current_block_time_slot)(current_block_trxs)(origtrxs_tb_next_id) )
 FC_REFLECT( eosio::ibc::original_trx_info, (id)(block_time_slot)(trx_id)(action) )
 FC_REFLECT( eosio::ibc::cash_trx_info, (seq_num)(block_time_slot)(trx_id)(action)(orig_trx_id)(orig_trx_block_num) )
