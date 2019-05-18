@@ -2773,7 +2773,6 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_block_commits_data_message &msg){
       peer_dlog(c, "received lwc_block_commits_data_message [${from},${to}]",("from",msg.headers.front().block_num())("to",msg.headers.back().block_num()));
 
-      #ifdef BOSCORE
       auto p = chain_contract->get_sections_tb_reverse_nth_section();
       if ( !p.valid() ){
          elog("can not get section info from ibc.chain contract");
@@ -2784,7 +2783,6 @@ namespace eosio { namespace ibc {
       if ( msg.headers.front().block_num() > ls.last ){
          chain_contract->pushblkcmits( msg );
       }
-      #endif
    }
 
    void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_trxs_request_message &msg ) {
