@@ -2664,13 +2664,13 @@ namespace eosio { namespace ibc {
 
          // construct and push section data
          incremental_merkle merkle = msg.blockroot_merkle;
-         for ( int i = 0; i < identical_num - msg.headers.front().block_num(); ++i ){
+         for ( int i = 0; i < identical_num - msg.headers.front().block_num() + 1; ++i ){
             merkle.append( msg.headers[i].id() );
          }
 
          lwc_section_data_message par;
          par.blockroot_merkle = merkle;
-         auto first_itr = msg.headers.begin() + ( identical_num - msg.headers.front().block_num() );
+         auto first_itr = msg.headers.begin() + ( identical_num - msg.headers.front().block_num() + 1 );
          for ( auto it = first_itr; it != msg.headers.end(); ++it ){
             par.headers.push_back( *it );
          }
