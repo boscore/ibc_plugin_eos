@@ -46,13 +46,7 @@ namespace eosio { namespace ibc {
 
    // ---- ibc.chain contract table related structs ----
    struct global_state_ibc_chain {
-      name              chain_name;
-      fc::sha256        chain_id;
-      name              consensus_algo;
-   };
-
-   struct global_mutable_ibc_chain {
-      uint32_t    last_anchor_block_num;
+      uint32_t    lib_depth;
    };
 
    struct section_type {
@@ -66,7 +60,7 @@ namespace eosio { namespace ibc {
 
    struct block_header_state_type {
       block_header_state_type():block_num(0),block_id(),header(),active_schedule_id(0),
-      pending_schedule_id(0),blockroot_merkle(),block_signing_key(),is_anchor_block(false){}
+      pending_schedule_id(0),blockroot_merkle(),block_signing_key(){}
       uint64_t                   block_num;
       block_id_type              block_id;
       signed_block_header        header;
@@ -74,7 +68,6 @@ namespace eosio { namespace ibc {
       uint32_t                   pending_schedule_id;
       incremental_merkle         blockroot_merkle;
       public_key_type            block_signing_key;
-      bool                       is_anchor_block;
    };
 
    struct blockroot_merkle_type {
@@ -101,28 +94,18 @@ namespace eosio { namespace ibc {
    };
 
    struct global_state_ibc_token {
-      name              this_chain;
+      name              ibc_contract;
+      name              peerchain_name;
+      name              peerchain_ibc_token_contract;
+      uint32_t          max_origtrxs_table_records;
+      uint32_t          cache_cashtrxs_table_records;
+      uint32_t          max_original_trxs_per_block;
       bool              active;
    };
 
-   struct peer_chain_state_ibc_token {
-      name           peerchain_name;
-      string         peerchain_info;
-      name           peerchain_ibc_token_contract;
-      name           thischain_ibc_chain_contract;
-      name           thischain_free_account;
-      uint32_t       max_original_trxs_per_block;
-      uint32_t       max_origtrxs_table_records;
-      uint32_t       cache_cashtrxs_table_records;
-      bool           active;
-   };
-
-   struct peer_chain_mutable_ibc_token {
-      peer_chain_mutable_ibc_token():peerchain_name(),cash_seq_num(0),last_confirmed_orig_trx_block_time_slot(0),
-                                     current_block_time_slot(0),current_block_trxs(0),origtrxs_tb_next_id(0){}
-      name        peerchain_name;
+   struct global_mutable_ibc_token {
       uint64_t    cash_seq_num;
-      uint32_t    last_confirmed_orig_trx_block_time_slot;
+      uint32_t    last_finished_trx_block_time_slot;
       uint32_t    current_block_time_slot;
       uint32_t    current_block_trxs;
       uint64_t    origtrxs_tb_next_id;
@@ -147,28 +130,21 @@ namespace eosio { namespace ibc {
    // ---- ibc.token contract action related structs ----
    struct cash_action_params {
       uint64_t                               seq_num;
-      name                                   from_chain;
-      transaction_id_type                    orig_trx_id;
+      uint32_t                               orig_trx_block_num;
       std::vector<char>                      orig_trx_packed_trx_receipt;
       std::vector<digest_type>               orig_trx_merkle_path;
-      uint32_t                               orig_trx_block_num;
-      std::vector<char>                      orig_trx_block_header;
-      std::vector<digest_type>               orig_trx_block_id_merkle_path;
-      uint32_t                               anchor_block_num;
-      name                                   to;      
-      asset                                  quantity;
+      transaction_id_type                    orig_trx_id;    // redundant, facilitate indexing and checking
+      name                                   to;             // redundant, facilitate indexing and checking
+      asset                                  quantity;       // redundant, facilitate indexing and checking
       string                                 memo;
+      name                                   relay;
    };
 
    struct cashconfirm_action_params {
-      name                                   from_chain;
-      transaction_id_type                    cash_trx_id;
+      uint32_t                               cash_trx_block_num;
       std::vector<char>                      cash_trx_packed_trx_receipt;
       std::vector<digest_type>               cash_trx_merkle_path;
-      uint32_t                               cash_trx_block_num;
-      std::vector<char>                      cash_trx_block_header;
-      std::vector<digest_type>               cash_trx_block_id_merkle_path;
-      uint32_t                               anchor_block_num;
+      transaction_id_type                    cash_trx_id;   // redundant, facilitate indexing and checking
       transaction_id_type                    orig_trx_id;
    };
 
@@ -183,26 +159,17 @@ namespace eosio { namespace ibc {
 
 FC_REFLECT( eosio::ibc::connection_status, (peer)(connecting)(syncing)(last_handshake) )
 
-FC_REFLECT( eosio::ibc::global_state_ibc_chain, (chain_name)(chain_id)(consensus_algo) )
+FC_REFLECT( eosio::ibc::global_state_ibc_chain, (lib_depth) )
 FC_REFLECT( eosio::ibc::section_type, (first)(last)(np_num)(valid)(producers)(block_nums) )
-FC_REFLECT( eosio::ibc::block_header_state_type, (block_num)(block_id)(header)(active_schedule_id)
-            (pending_schedule_id)(blockroot_merkle)(block_signing_key)(is_anchor_block) )
+FC_REFLECT( eosio::ibc::block_header_state_type, (block_num)(block_id)(header)(active_schedule_id)(pending_schedule_id)(blockroot_merkle)(block_signing_key) )
 FC_REFLECT( eosio::ibc::blockroot_merkle_type, (block_num)(merkle) )
+
 FC_REFLECT( eosio::ibc::transfer_action_type, (from)(to)(quantity)(memo) )
 FC_REFLECT( eosio::ibc::transfer_action_info, (contract)(from)(quantity) )
-FC_REFLECT( eosio::ibc::global_state_ibc_token, (this_chain)(active) )
-FC_REFLECT( eosio::ibc::global_mutable_ibc_chain, (last_anchor_block_num) )
-FC_REFLECT( eosio::ibc::peer_chain_state_ibc_token, (peerchain_name)(peerchain_info)(peerchain_ibc_token_contract)
-            (thischain_ibc_chain_contract)(thischain_free_account)(max_original_trxs_per_block)(max_origtrxs_table_records)
-            (cache_cashtrxs_table_records)(active) )
-FC_REFLECT( eosio::ibc::peer_chain_mutable_ibc_token, (peerchain_name)(cash_seq_num)
-            (last_confirmed_orig_trx_block_time_slot)(current_block_time_slot)(current_block_trxs)(origtrxs_tb_next_id) )
+FC_REFLECT( eosio::ibc::global_state_ibc_token, (ibc_contract)(peerchain_name)(peerchain_ibc_token_contract)(max_origtrxs_table_records)(cache_cashtrxs_table_records)(max_original_trxs_per_block)(active) )
+FC_REFLECT( eosio::ibc::global_mutable_ibc_token, (cash_seq_num)(last_finished_trx_block_time_slot)(current_block_time_slot)(current_block_trxs)(origtrxs_tb_next_id) )
 FC_REFLECT( eosio::ibc::original_trx_info, (id)(block_time_slot)(trx_id)(action) )
 FC_REFLECT( eosio::ibc::cash_trx_info, (seq_num)(block_time_slot)(trx_id)(action)(orig_trx_id)(orig_trx_block_num) )
-FC_REFLECT( eosio::ibc::cash_action_params, (seq_num)(from_chain)(orig_trx_id)(orig_trx_packed_trx_receipt)
-            (orig_trx_merkle_path)(orig_trx_block_num)(orig_trx_block_header)(orig_trx_block_id_merkle_path)
-            (anchor_block_num)(to)(quantity)(memo) )
-FC_REFLECT( eosio::ibc::cashconfirm_action_params, (from_chain)(cash_trx_id)(cash_trx_packed_trx_receipt)
-            (cash_trx_merkle_path)(cash_trx_block_num)(cash_trx_block_header)(cash_trx_block_id_merkle_path)
-            (anchor_block_num)(orig_trx_id) )
+FC_REFLECT( eosio::ibc::cash_action_params, (seq_num)(orig_trx_block_num)(orig_trx_packed_trx_receipt)(orig_trx_merkle_path)(orig_trx_id)(to)(quantity)(memo)(relay) )
+FC_REFLECT( eosio::ibc::cashconfirm_action_params, (cash_trx_block_num)(cash_trx_packed_trx_receipt)(cash_trx_merkle_path)(cash_trx_id)(orig_trx_id) )
 FC_REFLECT( eosio::ibc::memo_info_type, (receiver)(chain)(notes) )
