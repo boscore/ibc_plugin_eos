@@ -139,6 +139,7 @@ namespace eosio { namespace chain {
           *  @return map of transactions which have been unapplied
           */
          unapplied_transactions_type& get_unapplied_transactions();
+         void drop_all_unapplied_transactions();
 
          /**
           *

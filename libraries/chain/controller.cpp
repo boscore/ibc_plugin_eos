@@ -2210,6 +2210,10 @@ struct controller_impl {
 
 }; /// controller_impl
 
+void controller::drop_all_unapplied_transactions() {
+   my->unapplied_transactions.clear();
+}
+
 const resource_limits_manager&   controller::get_resource_limits_manager()const
 {
    return my->resource_limits;
