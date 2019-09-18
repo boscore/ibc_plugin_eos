@@ -1647,7 +1647,7 @@ namespace eosio { namespace ibc {
         response_expected(),
         no_retry(no_reason)
    {
-      fc_wlog( "accepted network connection" );
+      fc_wlog(logger,"accepted network connection" );
       initialize();
    }
 
@@ -1901,7 +1901,7 @@ namespace eosio { namespace ibc {
                                   if( !err ) {
                                      connect( c, endpoint_itr );
                                   } else {
-                                     fc_elog( "Unable to resolve ${peer_addr}: ${error}",
+                                     fc_elog(logger,"Unable to resolve ${peer_addr}: ${error}",
                                            (  "peer_addr", c->peer_name() )("error", err.message() ) );
                                   }
                                });
@@ -1929,7 +1929,7 @@ namespace eosio { namespace ibc {
                connect( c, endpoint_itr );
             }
             else {
-               fc_elog( "connection failed to ${peer}: ${error}",
+               fc_elog(logger,"connection failed to ${peer}: ${error}",
                      ( "peer", c->peer_name())("error",err.message()));
                c->connecting = false;
                my_impl->close(c);
@@ -1943,7 +1943,7 @@ namespace eosio { namespace ibc {
       boost::system::error_code ec;
       con->socket->set_option( nodelay, ec );
       if (ec) {
-         fc_elog( "connection failed to ${peer}: ${error}",
+         fc_elog(logger,"connection failed to ${peer}: ${error}",
                ( "peer", con->peer_name())("error",ec.message()));
          con->connecting = false;
          close(con);
@@ -2002,7 +2002,7 @@ namespace eosio { namespace ibc {
                }
             }
          } else {
-            fc_elog( "Error accepting connection: ${m}",( "m", ec.message() ) );
+            fc_elog(logger,"Error accepting connection: ${m}",( "m", ec.message() ) );
             // For the listed error codes below, recall start_listen_loop()
             switch (ec.value()) {
                case ECONNABORTED:
@@ -2102,9 +2102,9 @@ namespace eosio { namespace ibc {
                                        } else {
                                           auto pname = conn->peer_name();
                                           if (ec.value() != boost::asio::error::eof) {
-                                             fc_elog( "Error reading message from ${p}: ${m}",("p",pname)( "m", ec.message() ) );
+                                             fc_elog(logger,"Error reading message from ${p}: ${m}",("p",pname)( "m", ec.message() ) );
                                           } else {
-                                             fc_ilog( "Peer ${p} closed connection",("p",pname) );
+                                             fc_ilog(logger,"Peer ${p} closed connection",("p",pname) );
                                           }
                                           /* close( conn ); */
                                           conn->write_queue.clear();
@@ -2123,13 +2123,13 @@ namespace eosio { namespace ibc {
                                     }
                                     catch (...) {
                                        string pname = conn ? conn->peer_name() : "no connection name";
-                                       fc_elog( "Undefined exception hanlding the read data from connection ${p}",( "p",pname));
+                                       fc_elog(logger,"Undefined exception hanlding the read data from connection ${p}",( "p",pname));
                                        close( conn );
                                     }
                                  } );
       } catch (...) {
          string pname = conn ? conn->peer_name() : "no connection name";
-         fc_elog( "Undefined exception handling reading ${p}",("p",pname) );
+         fc_elog(logger,"Undefined exception handling reading ${p}",("p",pname) );
          close( conn );
       }
    }
@@ -2230,7 +2230,7 @@ namespace eosio { namespace ibc {
       }
       if (msg.generation == 1) {
          if( msg.node_id == node_id) {
-            fc_elog( "Self connection detected. Closing connection");
+            fc_elog(logger,"Self connection detected. Closing connection");
             c->enqueue( go_away_message( self ) );
             return;
          }
@@ -2262,7 +2262,7 @@ namespace eosio { namespace ibc {
          }
 
          //if( msg.chain_id != peerchain_id) {
-         //   fc_elog( "Peer chain id not correct. Closing connection");
+         //   fc_elog(logger,"Peer chain id not correct. Closing connection");
          //   c->enqueue( go_away_message(go_away_reason::wrong_chain) );
          //   return;
          //}
@@ -2302,7 +2302,7 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message( connection_ptr c, const go_away_message &msg ) {
       string rsn = reason_str( msg.reason );
       peer_ilog(c, "received go_away_message");
-      fc_ilog( "received a go away message from ${p}, reason = ${r}",
+      fc_ilog(logger,"received a go away message from ${p}, reason = ${r}",
             ("p", c->peer_name())("r",rsn));
       c->no_retry = msg.reason;
       if(msg.reason == duplicate ) {
@@ -3153,8 +3153,8 @@ namespace eosio { namespace ibc {
 
                      c->enqueue( msg );
                   } else {
-                     fc_elog( "c->current() is faulse" );
-                     fc_ilog( "close connection" );
+                     fc_elog(logger,"c->current() is faulse" );
+                     fc_ilog(logger,"close connection" );
                      close(c);
                   }
                }
@@ -3498,7 +3498,7 @@ namespace eosio { namespace ibc {
       auto head_slot = chain_plug->chain().fetch_block_by_number(head_num)->timestamp.slot;
 
       if ( head_slot < block_time_slot ){
-         fc_elog( "unknown block_time_slot" );
+         fc_elog(logger,"unknown block_time_slot" );
          return 0;
       }
 
@@ -3511,7 +3511,7 @@ namespace eosio { namespace ibc {
       }
 
       if ( check_slot != block_time_slot ){
-         fc_elog( "block of block_time_slot not found" );
+         fc_elog(logger,"block of block_time_slot not found" );
          return  0;
       }
 
@@ -4110,7 +4110,7 @@ namespace eosio { namespace ibc {
             connection_monitor(from_connection);
          }
          else {
-            fc_elog( "Error from connection check monitor: ${m}",( "m", ec.message()));
+            fc_elog(logger,"Error from connection check monitor: ${m}",( "m", ec.message()));
             start_conn_timer( connector_period, std::weak_ptr<connection>());
          }
       });
@@ -4154,7 +4154,7 @@ namespace eosio { namespace ibc {
          auto private_it = private_keys.find(msg.key);
 
          if( allowed_it == allowed_peers.end() && private_it == private_keys.end() ) {
-            fc_elog( "Peer ${peer} sent a handshake with an unauthorized key: ${key}.",
+            fc_elog(logger,"Peer ${peer} sent a handshake with an unauthorized key: ${key}.",
                   ("peer", msg.p2p_address)("key", msg.key));
             return false;
          }
@@ -4164,7 +4164,7 @@ namespace eosio { namespace ibc {
       sc::system_clock::duration msg_time(msg.time);
       auto time = sc::system_clock::now().time_since_epoch();
       if(time - msg_time > peer_authentication_interval) {
-         fc_elog( "Peer ${peer} sent a handshake with a timestamp skewed by more than ${time}.",
+         fc_elog(logger,"Peer ${peer} sent a handshake with a timestamp skewed by more than ${time}.",
                ("peer", msg.p2p_address)("time", "1 second")); // TODO Add to_variant for std::chrono::system_clock::duration
          return false;
       }
@@ -4172,7 +4172,7 @@ namespace eosio { namespace ibc {
       if(msg.sig != chain::signature_type() && msg.token != sha256()) {
          sha256 hash = fc::sha256::hash(msg.time);
          if(hash != msg.token) {
-            fc_elog( "Peer ${peer} sent a handshake with an invalid token.",
+            fc_elog(logger,"Peer ${peer} sent a handshake with an invalid token.",
                   ("peer", msg.p2p_address));
             return false;
          }
@@ -4181,18 +4181,18 @@ namespace eosio { namespace ibc {
             peer_key = crypto::public_key(msg.sig, msg.token, true);
          }
          catch (fc::exception& /*e*/) {
-            fc_elog( "Peer ${peer} sent a handshake with an unrecoverable key.",
+            fc_elog(logger,"Peer ${peer} sent a handshake with an unrecoverable key.",
                   ("peer", msg.p2p_address));
             return false;
          }
          if((allowed_connections & Specified) && peer_key != msg.key) {
-            fc_elog( "Peer ${peer} sent a handshake with an unauthenticated key.",
+            fc_elog(logger,"Peer ${peer} sent a handshake with an unauthenticated key.",
                   ("peer", msg.p2p_address));
             return false;
          }
       }
       else if(allowed_connections & Specified) {
-         fc_dlog( "Peer sent a handshake with blank signature and token, but this node accepts only authenticated connections.");
+         fc_dlog(logger,"Peer sent a handshake with blank signature and token, but this node accepts only authenticated connections.");
          return false;
       }
       return true;
@@ -4324,15 +4324,15 @@ namespace eosio { namespace ibc {
       try {
          OPTION_ASSERT( "ibc-chain-contract" )
          my->chain_contract.reset( new ibc_chain_contract( eosio::chain::name{ options.at("ibc-chain-contract").as<string>()}));
-         fc_ilog( "ibc chain contract account is ${name}", ("name",  options.at("ibc-chain-contract").as<string>()));
+         fc_ilog(logger,"ibc chain contract account is ${name}", ("name",  options.at("ibc-chain-contract").as<string>()));
 
          OPTION_ASSERT( "ibc-token-contract" )
          my->token_contract.reset( new ibc_token_contract( eosio::chain::name{ options.at("ibc-token-contract").as<string>()}));
-         fc_ilog( "ibc token contract account is ${name}", ("name",  options.at("ibc-token-contract").as<string>()));
+         fc_ilog(logger,"ibc token contract account is ${name}", ("name",  options.at("ibc-token-contract").as<string>()));
 
          OPTION_ASSERT( "ibc-relay-name" )
          my->relay = eosio::chain::name{ options.at("ibc-relay-name").as<string>() };
-         fc_ilog( "ibc relay account is ${name}", ("name",  options.at("ibc-relay-name").as<string>()));
+         fc_ilog(logger,"ibc relay account is ${name}", ("name",  options.at("ibc-relay-name").as<string>()));
 
          auto get_key = [=]( string key_spec_pair ) -> std::pair<public_key_type,private_key_type> {
             auto delim = key_spec_pair.find("=");
@@ -4353,7 +4353,7 @@ namespace eosio { namespace ibc {
          try {
             auto key = get_key( key_spec_pair );
             my->relay_private_key = key.second;
-            fc_ilog( "ibc relay public key is ${key}", ("key", key.first));
+            fc_ilog(logger,"ibc relay public key is ${key}", ("key", key.first));
          } catch (...) {
             EOS_ASSERT( false, chain::plugin_config_exception, "Malformed ibc-relay-private-key: \"${val}\"", ("val", key_spec_pair));
          }
@@ -4390,7 +4390,7 @@ namespace eosio { namespace ibc {
          }
 
          my->peerchain_id = fc::sha256( options.at( "ibc-peer-chain-id" ).as<string>() );
-         fc_ilog( "ibc peer chain id is ${id}", ("id",  my->peerchain_id.str()));
+         fc_ilog(logger,"ibc peer chain id is ${id}", ("id",  my->peerchain_id.str()));
 
          if( options.count( "ibc-peer-address" )) {
             my->supplied_peers = options.at( "ibc-peer-address" ).as<vector<string> >();
@@ -4485,13 +4485,13 @@ namespace eosio { namespace ibc {
 
    void ibc_plugin::plugin_shutdown() {
       try {
-         fc_ilog( "shutdown.." );
+         fc_ilog(logger,"shutdown.." );
          my->done = true;
          if( my->acceptor ) {
-            fc_ilog( "close acceptor" );
+            fc_ilog(logger,"close acceptor" );
             my->acceptor->close();
 
-            fc_ilog( "close ${s} connections",( "s",my->connections.size()) );
+            fc_ilog(logger,"close ${s} connections",( "s",my->connections.size()) );
             auto cons = my->connections;
             for( auto con : cons ) {
                my->close( con);
@@ -4503,7 +4503,7 @@ namespace eosio { namespace ibc {
              if( my_impl->thread_pool ) {
             my_impl->thread_pool->stop();
          }
-         fc_ilog( "exit shutdown" );
+         fc_ilog(logger,"exit shutdown" );
       }
       FC_CAPTURE_AND_RETHROW()
    }
