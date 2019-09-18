@@ -10,6 +10,7 @@
 #include <eosio/chain/exceptions.hpp>
 #include <eosio/chain/block.hpp>
 #include <eosio/chain/plugin_interface.hpp>
+#include <eosio/chain/thread_utils.hpp>
 #include <eosio/producer_plugin/producer_plugin.hpp>
 #include <eosio/chain/contract_types.hpp>
 
@@ -19,6 +20,7 @@
 #include <fc/io/raw.hpp>
 #include <fc/log/appender.hpp>
 #include <fc/container/flat.hpp>
+#include <fc/log/logger_config.hpp>
 #include <fc/reflect/variant.hpp>
 #include <fc/crypto/rand.hpp>
 #include <fc/exception/exception.hpp>
@@ -70,6 +72,7 @@ namespace eosio { namespace ibc {
    using connection_ptr = std::shared_ptr<connection>;
    using connection_wptr = std::weak_ptr<connection>;
    using socket_ptr = std::shared_ptr<tcp::socket>;
+   using io_work_t = boost::asio::executor_work_guard<boost::asio::io_context::executor_type>;
    using ibc_message_ptr = shared_ptr<ibc_message>;
 
    struct by_block_num;
@@ -173,7 +176,8 @@ namespace eosio { namespace ibc {
       shared_ptr<tcp::resolver>     resolver;
 
       bool                          use_socket_read_watermark = false;
-
+  uint16_t                                  thread_pool_size = 1;
+      optional<eosio::chain::named_thread_pool> thread_pool;
       void connect( connection_ptr c );
       void connect( connection_ptr c, tcp::resolver::iterator endpoint_itr );
       bool start_session( connection_ptr c );
@@ -604,7 +608,7 @@ namespace eosio { namespace ibc {
             } FC_LOG_AND_DROP()
          } else {
             // auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
-            // dlog("pushed transaction: ${id}", ( "id", trx_id ));
+            // fc_dlog(logger,"pushed transaction: ${id}", ( "id", trx_id ));
          }
       };
 
@@ -620,7 +624,7 @@ namespace eosio { namespace ibc {
             if ( !allow_failure ){ return; }
          } else {
             // auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
-            // dlog("pushed transaction: ${id}", ( "id", trx_id ));
+            // fc_dlog(logger,"pushed transaction: ${id}", ( "id", trx_id ));
          }
 
          int next_index = index + 1;
@@ -642,7 +646,7 @@ namespace eosio { namespace ibc {
 
    optional<signed_transaction> generate_signed_transaction_from_action( action actn ){
       if ( my_impl->relay_private_key == chain::private_key_type() ){
-         elog("ibc relay private key not found, can not execute action");
+         fc_elog(logger,"ibc relay private key not found, can not execute action");
          return optional<signed_transaction>();
       }
       signed_transaction trx;
@@ -657,7 +661,7 @@ namespace eosio { namespace ibc {
       if ( trx_opt.valid() ){
          push_transaction_base( *trx_opt );
       } else {
-         elog("push_action failed, for generate_signed_transaction_from_action failed");
+         fc_elog(logger,"push_action failed, for generate_signed_transaction_from_action failed");
       }
    }
 
@@ -859,7 +863,7 @@ namespace eosio { namespace ibc {
          fc::raw::unpack( ds, result );
          return result;
       } else {
-         elog("get_ibc_chain_global_mutable_singleton failed");
+         fc_elog(logger,"get_ibc_chain_global_mutable_singleton failed");
       }
       return optional<global_mutable_ibc_chain>();
    }
@@ -877,7 +881,7 @@ namespace eosio { namespace ibc {
       if ( gmp.valid() ) {
          return gmp->last_anchor_block_num;
       } else {
-         elog("get_last_anchor_block_num failed");
+         fc_elog(logger,"get_last_anchor_block_num failed");
       }
       return 0;
    }
@@ -889,7 +893,7 @@ namespace eosio { namespace ibc {
             ("blockroot_merkle",  msg.blockroot_merkle));
 
       if ( ! actn.valid() ){
-         elog("chain_init: get action failed");
+         fc_elog(logger,"chain_init: get action failed");
          return;
       }
       push_action( *actn );
@@ -901,7 +905,7 @@ namespace eosio { namespace ibc {
             ("blockroot_merkle",  msg.blockroot_merkle));
 
       if ( ! actn.valid() ){
-         elog("newsection: get action failed");
+         fc_elog(logger,"newsection: get action failed");
          return;
       }
       push_action( *actn );
@@ -915,7 +919,7 @@ namespace eosio { namespace ibc {
          ("proof_type",        msg.proof_type));
 
       if ( ! actn.valid() ){
-         elog("newsection: get action failed");
+         fc_elog(logger,"newsection: get action failed");
          return;
       }
       push_action( *actn );
@@ -925,7 +929,7 @@ namespace eosio { namespace ibc {
       auto actn = get_action( account, N(rmfirstsctn), vector<permission_level>{{ my_impl->relay, config::active_name}}, mvo());
 
       if ( ! actn.valid() ){
-         elog("newsection: get action failed");
+         fc_elog(logger,"newsection: get action failed");
          return;
       }
       push_action( *actn );
@@ -990,7 +994,7 @@ namespace eosio { namespace ibc {
       // --- get receiver ---
       auto pos = memo.find("@");
       if ( pos == std::string::npos ){
-         elog("memo format error, didn't find charactor \'@\' in memo");
+         fc_elog(logger,"memo format error, didn't find charactor \'@\' in memo");
          return optional<memo_info_type>();
       }
       
@@ -1014,12 +1018,12 @@ namespace eosio { namespace ibc {
       }
 
       if ( info.receiver == name() ){
-         elog("memo format error, receiver not provided in memo");
+         fc_elog(logger,"memo format error, receiver not provided in memo");
          return optional<memo_info_type>();
       }
 
       if ( info.chain == name() ){
-         elog("memo format error, chain not provided in memo");
+         fc_elog(logger,"memo format error, chain not provided in memo");
          return optional<memo_info_type>();
       }
       
@@ -1043,7 +1047,7 @@ namespace eosio { namespace ibc {
                bool_gs = true;
             }
          } else {
-            dlog("get ibc.token contract's global_state_singleton failed, is it initialized?");
+            fc_dlog(logger,"get ibc.token contract's global_state_singleton failed, is it initialized?");
          }
 
          auto pchs = get_peer_chain_state();
@@ -1055,10 +1059,10 @@ namespace eosio { namespace ibc {
                   bool_pchs = true;
                }
             } else {
-               elog("'thischain_ibc_chain_contract' configed in table 'peerchains' of ibc.token not consist with 'chain_name' configed in singleton 'global' of ibc.chain");
+               fc_elog(logger,"'thischain_ibc_chain_contract' configed in table 'peerchains' of ibc.token not consist with 'chain_name' configed in singleton 'global' of ibc.chain");
             }
          } else {
-            dlog("get ibc.token contract's peer_chain_state failed, is it initialized?");
+            fc_dlog(logger,"get ibc.token contract's peer_chain_state failed, is it initialized?");
          }
 
          if( bool_pchs && bool_gs ){
@@ -1306,10 +1310,10 @@ namespace eosio { namespace ibc {
             try {
                result.get<fc::exception_ptr>()->dynamic_rethrow_exception();
             } FC_LOG_AND_DROP()
-            elog("push cash transaction failed, orig_trx_id ${id}, index ${i}",("id", params->at(index).orig_trx_id)("i",index));
+            fc_elog(logger,"push cash transaction failed, orig_trx_id ${id}, index ${i}",("id", params->at(index).orig_trx_id)("i",index));
          } else {
             auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
-            dlog("pushed cash transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
+            fc_dlog(logger,"pushed cash transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
             next_seq_num += 1;
          }
 
@@ -1318,7 +1322,7 @@ namespace eosio { namespace ibc {
          if (next_index < params->size()) {
             push_cash_recurse( next_index, params, next_seq_num );
          } else {
-            dlog("all ${sum} cash transactions have tried to push, which belongs to blocks [${f},${t}]",
+            fc_dlog(logger,"all ${sum} cash transactions have tried to push, which belongs to blocks [${f},${t}]",
                  ("sum",params->size())("f",params->front().orig_trx_block_num)("t",params->back().orig_trx_block_num));
          }
       };
@@ -1339,13 +1343,13 @@ namespace eosio { namespace ibc {
                ("memo",                         par.memo));
 
       if ( ! actn.valid() ){
-         elog("get cash action failed");
+         fc_elog(logger,"get cash action failed");
          return;
       }
 
       auto trx_opt = generate_signed_transaction_from_action( *actn );
       if ( ! trx_opt.valid() ){
-         elog("generate_signed_transaction_from_action failed");
+         fc_elog(logger,"generate_signed_transaction_from_action failed");
          return;
       }
       my_impl->chain_plug->get_read_write_api().push_transaction( fc::variant_object(mvo(packed_transaction(*trx_opt))), next );
@@ -1354,7 +1358,7 @@ namespace eosio { namespace ibc {
    void ibc_token_contract::push_cash_trxs( const std::vector<ibc_trx_rich_info>& params, uint32_t start_seq_num ){
       auto peerchain_name = peer_chain_name();
       if ( peerchain_name == name() ) {
-         elog("internal error! peerchain_name is empty");
+         fc_elog(logger,"internal error! peerchain_name is empty");
          return;
       }
 
@@ -1378,7 +1382,7 @@ namespace eosio { namespace ibc {
 
             auto info = get_memo_info( actn.memo );
             if ( ! info.valid() ){
-               elog("internal error! memo string invalid");
+               fc_elog(logger,"internal error! memo string invalid");
                break;
             }
 
@@ -1387,7 +1391,7 @@ namespace eosio { namespace ibc {
             par.memo = "memo";
             actions.push_back(par);
          } else {
-            elog("internal error, failed to get transfer action infomation from packed_trx_receipt");
+            fc_elog(logger,"internal error, failed to get transfer action infomation from packed_trx_receipt");
             break;
          }
       }
@@ -1410,18 +1414,18 @@ namespace eosio { namespace ibc {
             try {
                result.get<fc::exception_ptr>()->dynamic_rethrow_exception();
             } FC_LOG_AND_DROP()
-            elog("push cashconfirm transaction failed, cash_trx_id: ${id}, ${s} succeed, ${l} left",("id",params->at(index).cash_trx_id)("s",index)("l",params->size() - index));
+            fc_elog(logger,"push cashconfirm transaction failed, cash_trx_id: ${id}, ${s} succeed, ${l} left",("id",params->at(index).cash_trx_id)("s",index)("l",params->size() - index));
             return;
          } else {
             auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
-            dlog("pushed cashconfirm transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
+            fc_dlog(logger,"pushed cashconfirm transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
          }
 
          int next_index = index + 1;
          if (next_index < params->size()) {
             push_cashconfirm_recurse( next_index, params );
          } else {
-            dlog("successfully pushed all ${sum} cashconfirm transactions, which belongs to blocks [${f},${t}]",
+            fc_dlog(logger,"successfully pushed all ${sum} cashconfirm transactions, which belongs to blocks [${f},${t}]",
                ("sum",params->size())("f",params->front().cash_trx_block_num)("t",params->back().cash_trx_block_num));
          }
       };
@@ -1439,13 +1443,13 @@ namespace eosio { namespace ibc {
          ("orig_trx_id",                  par.orig_trx_id));
 
       if ( ! actn.valid() ){
-         elog("get cashconfirm action failed");
+         fc_elog(logger,"get cashconfirm action failed");
          return;
       }
 
       auto trx_opt = generate_signed_transaction_from_action( *actn );
       if ( ! trx_opt.valid() ){
-         elog("generate_signed_transaction_from_action failed");
+         fc_elog(logger,"generate_signed_transaction_from_action failed");
          return;
       }
       my_impl->chain_plug->get_read_write_api().push_transaction( fc::variant_object(mvo(packed_transaction(*trx_opt))), next );
@@ -1454,7 +1458,7 @@ namespace eosio { namespace ibc {
    void ibc_token_contract::push_cashconfirm_trxs( const std::vector<ibc_trx_rich_info>& params, uint64_t start_seq_num ) {
       auto peerchain_name = peer_chain_name();
       if ( peerchain_name == name() ) {
-         elog("internal error! peerchain_name is empty");
+         fc_elog(logger,"internal error! peerchain_name is empty");
          return;
       }
 
@@ -1463,7 +1467,7 @@ namespace eosio { namespace ibc {
       for ( const auto& trx : params ){
          auto opt_cash = get_cash_action_params( trx.packed_trx_receipt );
          if ( ! opt_cash.valid() ){
-            elog("failed to get cash action parameters from packed_trx_receipt");
+            fc_elog(logger,"failed to get cash action parameters from packed_trx_receipt");
             return;
          }
          cash_action_params cash_params = *opt_cash;
@@ -1471,13 +1475,13 @@ namespace eosio { namespace ibc {
          transaction_id_type orig_trx_id;
          auto opt_orig = get_original_action_params( cash_params.orig_trx_packed_trx_receipt, &orig_trx_id );
          if ( ! opt_orig.valid() ){
-            elog("failed to get original action parameters from orig_trx_packed_trx_receipt");
+            fc_elog(logger,"failed to get original action parameters from orig_trx_packed_trx_receipt");
             return;
          }
          transfer_action_type orig_params = *opt_orig;
 
          if ( cash_params.seq_num != next_seq_num ){
-            elog("cash_params.seq_num ${n1} != next_seq_num ${n2}", ("n1",cash_params.seq_num)("n2",next_seq_num));
+            fc_elog(logger,"cash_params.seq_num ${n1} != next_seq_num ${n2}", ("n1",cash_params.seq_num)("n2",next_seq_num));
             return;
          }
 
@@ -1523,7 +1527,7 @@ namespace eosio { namespace ibc {
          ("memo",                         par.memo));
 
       if ( ! actn.valid() ){
-         elog("cash: get action failed");
+         fc_elog(logger,"cash: get action failed");
          return;
       }
       push_action( *actn );
@@ -1542,7 +1546,7 @@ namespace eosio { namespace ibc {
          ("orig_trx_id",                  par.orig_trx_id));
 
       if ( ! actn.valid() ){
-         elog("cash: get action failed");
+         fc_elog(logger,"cash: get action failed");
          return;
       }
       push_action( *actn );
@@ -1551,7 +1555,7 @@ namespace eosio { namespace ibc {
    void ibc_token_contract::push_rborrm_recurse( int index, const std::shared_ptr<std::vector<transaction_id_type>>& params, name action_name){
       auto peerchain_name = peer_chain_name();
       if ( peerchain_name == name() ) {
-         elog("internal error! peerchain_name is empty");
+         fc_elog(logger,"internal error! peerchain_name is empty");
          return;
       }
 
@@ -1560,10 +1564,10 @@ namespace eosio { namespace ibc {
             try {
                result.get<fc::exception_ptr>()->dynamic_rethrow_exception();
             } FC_LOG_AND_DROP()
-            elog("push rollback transaction failed, index ${idx}", ("idx", index));
+            fc_elog(logger,"push rollback transaction failed, index ${idx}", ("idx", index));
          } else {
             auto trx_id = result.get<chain_apis::read_write::push_transaction_results>().transaction_id;
-            dlog("pushed rollback transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
+            fc_dlog(logger,"pushed rollback transaction: ${id}, index ${idx}", ( "id", trx_id )("idx", index));
          }
 
          int next_index = index + 1;
@@ -1578,13 +1582,13 @@ namespace eosio { namespace ibc {
          ("trx_id",         trx_id));
 
       if ( ! actn.valid() ){
-         elog("newsection: get action failed");
+         fc_elog(logger,"newsection: get action failed");
          return;
       }
 
       auto trx_opt = generate_signed_transaction_from_action( *actn );
       if ( ! trx_opt.valid() ){
-         elog("generate_signed_transaction_from_action failed");
+         fc_elog(logger,"generate_signed_transaction_from_action failed");
          return;
       }
       my_impl->chain_plug->get_read_write_api().push_transaction( fc::variant_object(mvo(packed_transaction(*trx_opt))), next );
@@ -1616,7 +1620,7 @@ namespace eosio { namespace ibc {
 
    // --------------- connection ---------------
    connection::connection(string endpoint)
-      : socket(std::make_shared<tcp::socket>(std::ref(app().get_io_service()))),
+      : socket(std::make_shared<tcp::socket>(my_impl->thread_pool->get_executor() )),
         node_id(),
         last_handshake_recv(),
         last_handshake_sent(),
@@ -1627,7 +1631,7 @@ namespace eosio { namespace ibc {
         response_expected(),
         no_retry(no_reason)
    {
-      wlog("created connection to ${n}", ("n", endpoint));
+      fc_wlog(logger,"created connection to ${n}", ("n", endpoint));
       initialize();
    }
 
@@ -1643,7 +1647,7 @@ namespace eosio { namespace ibc {
         response_expected(),
         no_retry(no_reason)
    {
-      wlog( "accepted network connection" );
+      fc_wlog(logger,"accepted network connection" );
       initialize();
    }
 
@@ -1653,7 +1657,7 @@ namespace eosio { namespace ibc {
    void connection::initialize() {
       auto *rnd = node_id.data();
       rnd[0] = 0;
-      response_expected.reset(new boost::asio::steady_timer(app().get_io_service()));
+      response_expected.reset(new boost::asio::steady_timer(my_impl->thread_pool->get_executor() ));
    }
 
    bool connection::connected() {
@@ -1673,7 +1677,7 @@ namespace eosio { namespace ibc {
          socket->close();
       }
       else {
-         wlog("no socket to close!");
+         fc_wlog(logger,"no socket to close!");
       }
       flush_queues();
       connecting = false;
@@ -1758,10 +1762,10 @@ namespace eosio { namespace ibc {
             if(ec) {
                string pname = conn ? conn->peer_name() : "no connection name";
                if( ec.value() != boost::asio::error::eof) {
-                  elog("Error sending to peer ${p}: ${i}", ("p",pname)("i", ec.message()));
+                  fc_elog(logger,"Error sending to peer ${p}: ${i}", ("p",pname)("i", ec.message()));
                }
                else {
-                  ilog("connection closure detected on write to ${p}",("p",pname));
+                  fc_ilog(logger,"connection closure detected on write to ${p}",("p",pname));
                }
                my_impl->close(conn);
                return;
@@ -1774,17 +1778,17 @@ namespace eosio { namespace ibc {
          catch(const std::exception &ex) {
             auto conn = c.lock();
             string pname = conn ? conn->peer_name() : "no connection name";
-            elog("Exception in do_queue_write to ${p} ${s}", ("p",pname)("s",ex.what()));
+            fc_elog(logger,"Exception in do_queue_write to ${p} ${s}", ("p",pname)("s",ex.what()));
          }
          catch(const fc::exception &ex) {
             auto conn = c.lock();
             string pname = conn ? conn->peer_name() : "no connection name";
-            elog("Exception in do_queue_write to ${p} ${s}", ("p",pname)("s",ex.to_string()));
+            fc_elog(logger,"Exception in do_queue_write to ${p} ${s}", ("p",pname)("s",ex.to_string()));
          }
          catch(...) {
             auto conn = c.lock();
             string pname = conn ? conn->peer_name() : "no connection name";
-            elog("Exception in do_queue_write to ${p}", ("p",pname) );
+            fc_elog(logger,"Exception in do_queue_write to ${p}", ("p",pname) );
          }
       });
    }
@@ -1811,7 +1815,7 @@ namespace eosio { namespace ibc {
                      connection_ptr conn = weak_this.lock();
                      if (conn) {
                         if (close_after_send != no_reason) {
-                           elog ("sent a go away message: ${r}, closing connection to ${p}",("r", reason_str(close_after_send))("p", conn->peer_name()));
+                           fc_elog(logger,"sent a go away message: ${r}, closing connection to ${p}",("r", reason_str(close_after_send))("p", conn->peer_name()));
                            my_impl->close(conn);
                            return;
                         }
@@ -1870,7 +1874,7 @@ namespace eosio { namespace ibc {
       auto colon = c->peer_addr.find(':');
 
       if (colon == std::string::npos || colon == 0) {
-         elog ("Invalid peer address. must be \"host:port\": ${p}", ("p",c->peer_addr));
+         fc_elog(logger,"Invalid peer address. must be \"host:port\": ${p}", ("p",c->peer_addr));
          for ( auto itr : connections ) {
             if((*itr).peer_addr == c->peer_addr) {
                (*itr).reset();
@@ -1897,7 +1901,7 @@ namespace eosio { namespace ibc {
                                   if( !err ) {
                                      connect( c, endpoint_itr );
                                   } else {
-                                     elog( "Unable to resolve ${peer_addr}: ${error}",
+                                     fc_elog(logger,"Unable to resolve ${peer_addr}: ${error}",
                                            (  "peer_addr", c->peer_name() )("error", err.message() ) );
                                   }
                                });
@@ -1925,7 +1929,7 @@ namespace eosio { namespace ibc {
                connect( c, endpoint_itr );
             }
             else {
-               elog( "connection failed to ${peer}: ${error}",
+               fc_elog(logger,"connection failed to ${peer}: ${error}",
                      ( "peer", c->peer_name())("error",err.message()));
                c->connecting = false;
                my_impl->close(c);
@@ -1939,7 +1943,7 @@ namespace eosio { namespace ibc {
       boost::system::error_code ec;
       con->socket->set_option( nodelay, ec );
       if (ec) {
-         elog( "connection failed to ${peer}: ${error}",
+         fc_elog(logger,"connection failed to ${peer}: ${error}",
                ( "peer", con->peer_name())("error",ec.message()));
          con->connecting = false;
          close(con);
@@ -1953,7 +1957,7 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::start_listen_loop( ) {
-      auto socket = std::make_shared<tcp::socket>( std::ref( app().get_io_service() ) );
+      auto socket = std::make_shared<tcp::socket>(  my_impl->thread_pool->get_executor()  );
       acceptor->async_accept( *socket, [socket,this]( boost::system::error_code ec ) {
          if( !ec ) {
             uint32_t visitors = 0;
@@ -1975,7 +1979,7 @@ namespace eosio { namespace ibc {
                   }
                }
                if (num_clients != visitors) {
-                  ilog ("checking max client, visitors = ${v} num clients ${n}",("v",visitors)("n",num_clients));
+                  fc_ilog(logger,"checking max client, visitors = ${v} num clients ${n}",("v",visitors)("n",num_clients));
                   num_clients = visitors;
                }
                if( from_addr < max_nodes_per_host && (max_client_count == 0 || num_clients < max_client_count )) {
@@ -1998,7 +2002,7 @@ namespace eosio { namespace ibc {
                }
             }
          } else {
-            elog( "Error accepting connection: ${m}",( "m", ec.message() ) );
+            fc_elog(logger,"Error accepting connection: ${m}",( "m", ec.message() ) );
             // For the listed error codes below, recall start_listen_loop()
             switch (ec.value()) {
                case ECONNABORTED:
@@ -2053,7 +2057,7 @@ namespace eosio { namespace ibc {
                                     try {
                                        if( !ec ) {
                                           if (bytes_transferred > conn->pending_message_buffer.bytes_to_write()) {
-                                             elog("async_read_some callback: bytes_transfered = ${bt}, buffer.bytes_to_write = ${btw}",
+                                             fc_elog(logger,"async_read_some callback: bytes_transfered = ${bt}, buffer.bytes_to_write = ${btw}",
                                                   ("bt",bytes_transferred)("btw",conn->pending_message_buffer.bytes_to_write()));
                                           }
                                           EOS_ASSERT(bytes_transferred <= conn->pending_message_buffer.bytes_to_write(), plugin_exception, "");
@@ -2070,7 +2074,7 @@ namespace eosio { namespace ibc {
                                                 conn->pending_message_buffer.peek(&message_length, sizeof(message_length), index);
                                                 if(message_length > def_send_buffer_size*2 || message_length == 0) {
                                                    boost::system::error_code ec;
-                                                   elog("incoming message length unexpected (${i}), from ${p}", ("i", message_length)("p",boost::lexical_cast<std::string>(conn->socket->remote_endpoint(ec))));
+                                                   fc_elog(logger,"incoming message length unexpected (${i}), from ${p}", ("i", message_length)("p",boost::lexical_cast<std::string>(conn->socket->remote_endpoint(ec))));
                                                    close(conn);
                                                    return;
                                                 }
@@ -2098,9 +2102,9 @@ namespace eosio { namespace ibc {
                                        } else {
                                           auto pname = conn->peer_name();
                                           if (ec.value() != boost::asio::error::eof) {
-                                             elog( "Error reading message from ${p}: ${m}",("p",pname)( "m", ec.message() ) );
+                                             fc_elog(logger,"Error reading message from ${p}: ${m}",("p",pname)( "m", ec.message() ) );
                                           } else {
-                                             ilog( "Peer ${p} closed connection",("p",pname) );
+                                             fc_ilog(logger,"Peer ${p} closed connection",("p",pname) );
                                           }
                                           /* close( conn ); */
                                           conn->write_queue.clear();
@@ -2109,23 +2113,23 @@ namespace eosio { namespace ibc {
                                     }
                                     catch(const std::exception &ex) {
                                        string pname = conn ? conn->peer_name() : "no connection name";
-                                       elog("Exception in handling read data from ${p} ${s}",("p",pname)("s",ex.what()));
+                                       fc_elog(logger,"Exception in handling read data from ${p} ${s}",("p",pname)("s",ex.what()));
                                        close( conn );
                                     }
                                     catch(const fc::exception &ex) {
                                        string pname = conn ? conn->peer_name() : "no connection name";
-                                       elog("Exception in handling read data ${s}", ("p",pname)("s",ex.to_string()));
+                                       fc_elog(logger,"Exception in handling read data ${s}", ("p",pname)("s",ex.to_string()));
                                        close( conn );
                                     }
                                     catch (...) {
                                        string pname = conn ? conn->peer_name() : "no connection name";
-                                       elog( "Undefined exception hanlding the read data from connection ${p}",( "p",pname));
+                                       fc_elog(logger,"Undefined exception hanlding the read data from connection ${p}",( "p",pname));
                                        close( conn );
                                     }
                                  } );
       } catch (...) {
          string pname = conn ? conn->peer_name() : "no connection name";
-         elog( "Undefined exception handling reading ${p}",("p",pname) );
+         fc_elog(logger,"Undefined exception handling reading ${p}",("p",pname) );
          close( conn );
       }
    }
@@ -2194,20 +2198,20 @@ namespace eosio { namespace ibc {
       // affecting state.
       bool valid = true;
       if (msg.last_irreversible_block_num > msg.head_num) {
-         wlog("Handshake message validation: last irreversible block (${i}) is greater than head block (${h})",
+         fc_wlog(logger,"Handshake message validation: last irreversible block (${i}) is greater than head block (${h})",
               ("i", msg.last_irreversible_block_num)("h", msg.head_num));
          valid = false;
       }
       if (msg.p2p_address.empty()) {
-         wlog("Handshake message validation: p2p_address is null string");
+         fc_wlog(logger,"Handshake message validation: p2p_address is null string");
          valid = false;
       }
       if (msg.os.empty()) {
-         wlog("Handshake message validation: os field is null string");
+         fc_wlog(logger,"Handshake message validation: os field is null string");
          valid = false;
       }
       if ((msg.sig != chain::signature_type() || msg.token != sha256()) && (msg.token != fc::sha256::hash(msg.time))) {
-         wlog("Handshake message validation: token field invalid");
+         fc_wlog(logger,"Handshake message validation: token field invalid");
          valid = false;
       }
       return valid;
@@ -2226,7 +2230,7 @@ namespace eosio { namespace ibc {
       }
       if (msg.generation == 1) {
          if( msg.node_id == node_id) {
-            elog( "Self connection detected. Closing connection");
+            fc_elog(logger,"Self connection detected. Closing connection");
             c->enqueue( go_away_message( self ) );
             return;
          }
@@ -2258,7 +2262,7 @@ namespace eosio { namespace ibc {
          }
 
          //if( msg.chain_id != peerchain_id) {
-         //   elog( "Peer chain id not correct. Closing connection");
+         //   fc_elog(logger,"Peer chain id not correct. Closing connection");
          //   c->enqueue( go_away_message(go_away_reason::wrong_chain) );
          //   return;
          //}
@@ -2266,12 +2270,12 @@ namespace eosio { namespace ibc {
          c->protocol_version = msg.network_version;
          if(c->protocol_version != net_version) {
             if (network_version_match) {
-               elog("Peer network version does not match expected ${nv} but got ${mnv}",
+               fc_elog(logger,"Peer network version does not match expected ${nv} but got ${mnv}",
                     ("nv", net_version)("mnv", c->protocol_version));
                c->enqueue(go_away_message(wrong_version));
                return;
             } else {
-               ilog("Local network version: ${nv} Remote version: ${mnv}",
+               fc_ilog(logger,"Local network version: ${nv} Remote version: ${mnv}",
                     ("nv", net_version)("mnv", c->protocol_version));
             }
          }
@@ -2281,7 +2285,7 @@ namespace eosio { namespace ibc {
          }
 
          if(!authenticate_peer(msg)) {
-            elog("Peer not authenticated.  Closing connection.");
+            fc_elog(logger,"Peer not authenticated.  Closing connection.");
             c->enqueue(go_away_message(authentication));
             return;
          }
@@ -2298,7 +2302,7 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message( connection_ptr c, const go_away_message &msg ) {
       string rsn = reason_str( msg.reason );
       peer_ilog(c, "received go_away_message");
-      ilog( "received a go away message from ${p}, reason = ${r}",
+      fc_ilog(logger,"received a go away message from ${p}, reason = ${r}",
             ("p", c->peer_name())("r",rsn));
       c->no_retry = msg.reason;
       if(msg.reason == duplicate ) {
@@ -2345,7 +2349,7 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_heartbeat_message &msg ) {
       peer_dlog(c, "received ibc_heartbeat_message");
 
-      ilog("received msg: origtrxs_table_id_range [${of},${ot}] cashtrxs_table_seq_num_range [${cf},${ct}] new_producers_block_num ${n}, lwcls_range [${lsf},${lst}]",
+      fc_ilog(logger,"received msg: origtrxs_table_id_range [${of},${ot}] cashtrxs_table_seq_num_range [${cf},${ct}] new_producers_block_num ${n}, lwcls_range [${lsf},${lst}]",
            ("of",msg.origtrxs_table_id_range.first)("ot",msg.origtrxs_table_id_range.second)
            ("cf",msg.cashtrxs_table_seq_num_range.first)("ct",msg.cashtrxs_table_seq_num_range.second)
            ("n",msg.new_producers_block_num)("lsf",msg.lwcls.first_num)("lst",msg.lwcls.last_num));
@@ -2362,7 +2366,7 @@ namespace eosio { namespace ibc {
             p = cc.fetch_block_state_by_number( check_num );
 
             if ( p == block_state_ptr() ){
-               ilog("didn't get block_state_ptr of block num: ${n}", ("n", check_num ));
+               fc_ilog(logger,"didn't get block_state_ptr of block num: ${n}", ("n", check_num ));
             }else{
                break;
             }
@@ -2375,12 +2379,12 @@ namespace eosio { namespace ibc {
          }
 
          if ( p == block_state_ptr() ){
-            ilog("didn't get any block state finally, wait");
+            fc_ilog(logger,"didn't get any block state finally, wait");
             return;
          }
 
          if ( p->pending_schedule.schedule.version != p->active_schedule.version ){
-            ilog("pending_schedule version not equal to active_schedule version, wait until equal");
+            fc_ilog(logger,"pending_schedule version not equal to active_schedule version, wait until equal");
             return;
          }
 
@@ -2454,7 +2458,7 @@ namespace eosio { namespace ibc {
 
             auto gm_opt = token_contract->get_peer_chain_mutable();
             if ( !gm_opt.valid() ){
-               elog("internal error, failed to get global_mutable_singleton");
+               fc_elog(logger,"internal error, failed to get global_mutable_singleton");
                return;
             }
 
@@ -2508,12 +2512,12 @@ namespace eosio { namespace ibc {
       }
 
       // calculate from known block, ( may happen when node restarted )
-      ilog("didn't find blockroot_merkle of block ${n} in cache, calculate it by known blockroot_merkles",("n",check_num));
+      fc_ilog(logger,"didn't find blockroot_merkle of block ${n} in cache, calculate it by known blockroot_merkles",("n",check_num));
       blockroot_merkle_type walk_point;
       walk_point.block_num = check_num - ( check_num % 64 );
       auto sbp = my_impl->chain_plug->chain().fetch_block_by_number( walk_point.block_num );
       if ( sbp == signed_block_ptr() ){
-         elog("walk_point block ${n} not exist", ("n", check_num));
+         fc_elog(logger,"walk_point block ${n} not exist", ("n", check_num));
          return empty;
       }
       bool has_merkle_extension = false;
@@ -2526,10 +2530,10 @@ namespace eosio { namespace ibc {
       }
 
       if ( ! has_merkle_extension ){
-         elog("didn't find blockroot_merkle of block ${n} in block_log.dat, can't calculate block ${m}'s blockroot_merkle",("n",walk_point.block_num )("m",check_num));
+         fc_elog(logger,"didn't find blockroot_merkle of block ${n} in block_log.dat, can't calculate block ${m}'s blockroot_merkle",("n",walk_point.block_num )("m",check_num));
          return empty;
       } else {
-         dlog("calculate block ${n}'s blockroot_merkle from block ${m}",("n",check_num)("m",walk_point.block_num ));
+         fc_dlog(logger,"calculate block ${n}'s blockroot_merkle from block ${m}",("n",check_num)("m",walk_point.block_num ));
       }
 
       uint32_t count = check_num - walk_point.block_num;
@@ -2542,7 +2546,7 @@ namespace eosio { namespace ibc {
          return walk_point.merkle;
       }
 
-      elog("internal error, calculate blockroot_merkle of block ${n} failed", ("n",check_num));
+      fc_elog(logger,"internal error, calculate blockroot_merkle of block ${n} failed", ("n",check_num));
       return empty;
    }
 
@@ -2556,11 +2560,11 @@ namespace eosio { namespace ibc {
          return;
       }
       if ( rq_length >= MaxSendSectionLength && lib_block_num - msg.start_block_num < MaxSendSectionLength ){
-         // ilog("have not enough data");
+         // fc_ilog(logger,"have not enough data");
          return;
       }
       if  ( rq_length < MaxSendSectionLength && msg.end_block_num > lib_block_num ) {
-         // ilog("have not enough data");
+         // fc_ilog(logger,"have not enough data");
          return;
       }
 
@@ -2576,13 +2580,13 @@ namespace eosio { namespace ibc {
 
          auto sbp = chain_plug->chain().fetch_block_by_number(start_num);
          if ( sbp == signed_block_ptr() ){
-            elog("block ${n} not exist", ("n", start_num));
+            fc_elog(logger,"block ${n} not exist", ("n", start_num));
             return;
          }
 
          auto inc_merkle = get_blockroot_merkle_by_num( start_num );
          if ( inc_merkle._node_count == 0 ){
-            elog("get blockroot_merkle of block ${n} failed", ("n", start_num));
+            fc_elog(logger,"get blockroot_merkle of block ${n} failed", ("n", start_num));
             return;
          }
 
@@ -2607,7 +2611,7 @@ namespace eosio { namespace ibc {
 
       auto p = chain_contract->get_sections_tb_reverse_nth_section();
       if ( !p.valid() ){
-         elog("can not get section info from ibc.chain contract");
+         fc_elog(logger,"can not get section info from ibc.chain contract");
          return;
       }
       section_type ls = *p;
@@ -2616,12 +2620,12 @@ namespace eosio { namespace ibc {
       uint32_t msg_last_num = msg.headers.rbegin()->block_num();
 
       if( msg_last_num <= ls.last && msg.headers.rbegin()->id() == chain_contract->get_chaindb_tb_block_id_by_block_num(msg_last_num) ){
-         ilog("lwc_section_data_message has no new data");
+         fc_ilog(logger,"lwc_section_data_message has no new data");
          return;
       }
 
       if ( ls.valid && msg_last_num <= std::max(ls.first, ls.last - chain_contract->lwc_lib_depth) ){
-         ilog("nothing to do");
+         fc_ilog(logger,"nothing to do");
          return;
       }
 
@@ -2653,7 +2657,7 @@ namespace eosio { namespace ibc {
                // delete lwcls ?
                chain_contract->pushsection( msg );
             }
-            elog("*****??");
+            fc_elog(logger,"*****??");
             return;
          }
 
@@ -2700,13 +2704,13 @@ namespace eosio { namespace ibc {
          }
          for( uint32_t num = msg.block_num; num <= end_block_num; ++num ){
             auto sbp = chain_plug->chain().fetch_block_by_number( num );
-            if ( sbp == signed_block_ptr() ){ elog("block ${n} not exist", ("n", num)); return; }
+            if ( sbp == signed_block_ptr() ){ fc_elog(logger,"block ${n} not exist", ("n", num)); return; }
             ret_msg.headers.push_back( *sbp );
          }
          // ret_msg.blockroot_merkle
          ret_msg.blockroot_merkle = get_blockroot_merkle_by_num( msg.block_num );
          if ( ret_msg.blockroot_merkle._node_count == 0 ){
-            elog("get blockroot_merkle of block ${n} failed", ("n", msg.block_num));
+            fc_elog(logger,"get blockroot_merkle of block ${n} failed", ("n", msg.block_num));
             return;
          }
          ret_msg.proof_data = fc::raw::pack( bps_ptr->commits );
@@ -2722,7 +2726,7 @@ namespace eosio { namespace ibc {
 
          check_num = msg.block_num + i;
          if ( check_num > lib_block_num ){ break;}
-         ilog("check_num = ${n}", ("n",check_num));
+         fc_ilog(logger,"check_num = ${n}", ("n",check_num));
          signed_block_ptr sbp = chain_plug->chain().fetch_block_by_number( check_num );
          for ( auto& ext : sbp->block_extensions ){
             if ( ext.first == 0x1 && ext.second.size()>0 ){
@@ -2735,7 +2739,7 @@ namespace eosio { namespace ibc {
          }
       }
       if( content.empty() ){
-         elog("didn't get pbft_state of block ${n}", ("n",msg.block_num));
+         fc_elog(logger,"didn't get pbft_state of block ${n}", ("n",msg.block_num));
          return;
       }
 
@@ -2749,13 +2753,13 @@ namespace eosio { namespace ibc {
       }
       for( uint32_t num = check_num; num <= end_block_num; ++num ){
          auto sbp = chain_plug->chain().fetch_block_by_number( num );
-         if ( sbp == signed_block_ptr() ){ elog("block ${n} not exist", ("n", num)); return; }
+         if ( sbp == signed_block_ptr() ){ fc_elog(logger,"block ${n} not exist", ("n", num)); return; }
          ret_msg.headers.push_back( *sbp );
       }
       // ret_msg.blockroot_merkle
       ret_msg.blockroot_merkle = get_blockroot_merkle_by_num( check_num );
       if ( ret_msg.blockroot_merkle._node_count == 0 ){
-         elog("get blockroot_merkle of block ${n} failed", ("n", check_num));
+         fc_elog(logger,"get blockroot_merkle of block ${n} failed", ("n", check_num));
          return;
       }
       ret_msg.proof_data = fc::raw::pack( scp.checkpoints );
@@ -2770,7 +2774,7 @@ namespace eosio { namespace ibc {
 
       auto p = chain_contract->get_sections_tb_reverse_nth_section();
       if ( !p.valid() ){
-         elog("can not get section info from ibc.chain contract");
+         fc_elog(logger,"can not get section info from ibc.chain contract");
          return;
       }
       section_type ls = *p;
@@ -2799,7 +2803,7 @@ namespace eosio { namespace ibc {
                if ( info_opt.valid() ){
                   ret_msg.trxs_rich_info.push_back( *info_opt );
                } else {
-                  elog("internal error, failed to get rich info of transaction: ${trx}, block time slot: ${tsl}",("trx",trx_info.trx_id)("tsl",trx_info.block_time_slot));
+                  fc_elog(logger,"internal error, failed to get rich info of transaction: ${trx}, block time slot: ${tsl}",("trx",trx_info.trx_id)("tsl",trx_info.block_time_slot));
                }
             }
          }
@@ -2814,7 +2818,7 @@ namespace eosio { namespace ibc {
                if ( info_opt.valid() ){
                   ret_msg.trxs_rich_info.push_back( *info_opt );
                } else {
-                  elog("internal error, failed to get rich info of transaction: ${trx}, block time slot: ${tsl}",("trx",trx_info.trx_id)("tsl",trx_info.block_time_slot));
+                  fc_elog(logger,"internal error, failed to get rich info of transaction: ${trx}, block time slot: ${tsl}",("trx",trx_info.trx_id)("tsl",trx_info.block_time_slot));
                }
             }
          }
@@ -2911,7 +2915,7 @@ namespace eosio { namespace ibc {
          if ( block_num < msg.anchor_block_num ){
             auto merkle_path = get_block_id_merkle_path_to_anchor_block( block_num, msg.anchor_block_num );
             if ( merkle_path.size() == 0 ){
-               elog("get_block_id_merkle_path_to_anchor_block from ${f} to ${t} failed", ("f",block_num)("t",msg.anchor_block_num));
+               fc_elog(logger,"get_block_id_merkle_path_to_anchor_block from ${f} to ${t} failed", ("f",block_num)("t",msg.anchor_block_num));
                return;
             }
             ret_msg.block_merkle_paths.emplace_back( block_num, merkle_path );
@@ -2933,7 +2937,7 @@ namespace eosio { namespace ibc {
          auto it_blk_num = local_origtrxs.get<by_block_num>().lower_bound( first_block_num );
          auto it = local_origtrxs.project<0>(it_blk_num);
          if ( it == local_origtrxs.end() || it->block_num != first_block_num ){
-            elog("internal error, it->block_num != first_block_num");
+            fc_elog(logger,"internal error, it->block_num != first_block_num");
             return;
          }
 
@@ -2953,7 +2957,7 @@ namespace eosio { namespace ibc {
          auto it_blk_num = local_cashtrxs.get<by_block_num>().lower_bound( first_block_num );
          auto it = local_cashtrxs.project<0>(it_blk_num);
          if ( it == local_cashtrxs.end() || it->block_num != first_block_num ){
-            elog("internal error, it->block_num != first_block_num");
+            fc_elog(logger,"internal error, it->block_num != first_block_num");
             return;
          }
 
@@ -2969,7 +2973,7 @@ namespace eosio { namespace ibc {
          return;
       }
       
-      elog("internal error!");
+      fc_elog(logger,"internal error!");
    }
 
    incremental_merkle ibc_plugin_impl::get_brtm_from_cache( uint32_t block_num ){
@@ -3022,13 +3026,13 @@ namespace eosio { namespace ibc {
    bool ibc_plugin_impl::should_send_ibc_heartbeat(){
 
 //      if ( chain_plug->chain().fork_db_head_block_num() < 400 ){
-//         dlog("waiting chain's head block number greater than 400");
+//         fc_dlog(logger,"waiting chain's head block number greater than 400");
 //         return false;
 //      }
       
       // check if local head catch up
       if ( !is_head_catchup() ){
-         ilog("local chain head doesn't catch up current chain head, waiting...");
+         fc_ilog(logger,"local chain head doesn't catch up current chain head, waiting...");
          return false;
       }
 
@@ -3037,18 +3041,18 @@ namespace eosio { namespace ibc {
          chain_contract->get_contract_state();
       }
       if ( chain_contract->state == none ){
-         ilog("ibc.chain contract not deployed");
+         fc_ilog(logger,"ibc.chain contract not deployed");
          return false;
       }
       if (!chain_contract->lwc_config_valid() ){
-         ilog("ibc.chain contract global_state validate failed");
+         fc_ilog(logger,"ibc.chain contract global_state validate failed");
          return false;
       }
 
       // check ibc.token contract
       if ( token_contract->state != working ){
          token_contract->get_contract_state();
-         ilog("ibc.token contract not in working state, current state: ${s}", ("s", contract_state_str( token_contract->state )));
+         fc_ilog(logger,"ibc.token contract not in working state, current state: ${s}", ("s", contract_state_str( token_contract->state )));
          return false;
       }
 
@@ -3061,7 +3065,7 @@ namespace eosio { namespace ibc {
 
       auto lwcls = sum_received_lwcls_info();
       if ( lwcls == lwc_section_type() ){
-         ilog("doesn't receive any lwcls infomation from connected peer chain relay nodes");
+         fc_ilog(logger,"doesn't receive any lwcls infomation from connected peer chain relay nodes");
          return;
       }
 
@@ -3084,7 +3088,7 @@ namespace eosio { namespace ibc {
          auto np_opt = get_block_ptr(check_block_num)->new_producers;
          if ( np_opt.valid() && np_opt->producers.size() > 0 ){
             msg.new_producers_block_num = check_block_num - 1;
-            ilog("find new_producers_block_num ${n} < ---- new producers ---- >",("n",msg.new_producers_block_num));
+            fc_ilog(logger,"find new_producers_block_num ${n} < ---- new producers ---- >",("n",msg.new_producers_block_num));
             return;
          }
          ++check_block_num;
@@ -3135,29 +3139,29 @@ namespace eosio { namespace ibc {
                ibc_token_contract_checker(msg);
 
                if ( connections.size() == 0 ){
-                  elog("connections.size() == 0");
+                  fc_elog(logger,"connections.size() == 0");
                }
 
                for( auto &c : connections) {
                   if( c->current() ) {
                      peer_ilog(c,"sending ibc_heartbeat_message");
 
-                     dlog("origtrxs_table_id_range [${of},${ot}] cashtrxs_table_seq_num_range [${cf},${ct}] new_producers_block_num ${n}, lwcls_range [${lsf},${lst},${v}]",
+                     fc_dlog(logger,"origtrxs_table_id_range [${of},${ot}] cashtrxs_table_seq_num_range [${cf},${ct}] new_producers_block_num ${n}, lwcls_range [${lsf},${lst},${v}]",
                           ("of",msg.origtrxs_table_id_range.first)("ot",msg.origtrxs_table_id_range.second)
                              ("cf",msg.cashtrxs_table_seq_num_range.first)("ct",msg.cashtrxs_table_seq_num_range.second)
                              ("n",msg.new_producers_block_num)("lsf",msg.lwcls.first_num)("lst",msg.lwcls.last_num)("v",msg.lwcls.valid));
 
                      c->enqueue( msg );
                   } else {
-                     elog( "c->current() is faulse" );
-                     ilog( "close connection" );
+                     fc_elog(logger,"c->current() is faulse" );
+                     fc_ilog(logger,"close connection" );
                      close(c);
                   }
                }
             }
          } FC_LOG_AND_DROP()
       } else {
-         elog("count_open_sockets() == 0");
+         fc_elog(logger,"count_open_sockets() == 0");
       }
 
 
@@ -3165,7 +3169,7 @@ namespace eosio { namespace ibc {
       ibc_heartbeat_timer->async_wait ([this](boost::system::error_code ec) {
          start_ibc_heartbeat_timer();
          if (ec) {
-            wlog ("start_ibc_heartbeat_timer error: ${m}", ("m", ec.message()));
+            fc_wlog(logger,"start_ibc_heartbeat_timer error: ${m}", ("m", ec.message()));
          }
       });
    }
@@ -3282,8 +3286,8 @@ namespace eosio { namespace ibc {
    digest_type get_inc_merkle_layer_left_node( const incremental_merkle& inc_mkl, const uint32_t& layer ){
       auto max_layers = eosio::chain::detail::calcluate_max_depth( inc_mkl._node_count );
 
-      if ( inc_mkl._node_count == 0 ){ elog("inc_mkl._node_count == 0"); return digest_type(); }
-      if ( layer >= max_layers ){ elog("layer >= max_layers"); return digest_type(); }
+      if ( inc_mkl._node_count == 0 ){ fc_elog(logger,"inc_mkl._node_count == 0"); return digest_type(); }
+      if ( layer >= max_layers ){ fc_elog(logger,"layer >= max_layers"); return digest_type(); }
 
       auto current_layer = 1;
       auto index = inc_mkl._node_count;
@@ -3318,7 +3322,7 @@ namespace eosio { namespace ibc {
 
    std::tuple<uint32_t,uint32_t,digest_type> get_inc_merkle_full_branch_root_cover_from( const uint32_t& from_block_num, const incremental_merkle& inc_mkl ) {
       if ( from_block_num > inc_mkl._node_count ){
-         elog("from_block_num > inc_mkl._node_count");
+         fc_elog(logger,"from_block_num > inc_mkl._node_count");
          return std::tuple<uint32_t,uint32_t,digest_type>();
       }
 
@@ -3353,14 +3357,14 @@ namespace eosio { namespace ibc {
          index = index >> 1;
       }
 
-      elog("can not get_inc_merkle_full_branch_root_cover_from");
+      fc_elog(logger,"can not get_inc_merkle_full_branch_root_cover_from");
       return std::tuple<uint32_t,uint32_t,digest_type>();
    }
 
 // nodes in layer range [ 2, max_layers ]
    std::vector<std::pair<uint32_t,uint32_t>> get_merkle_path_positions_to_layer_in_full_branch( uint32_t from_block_num, uint32_t to_layer ){
       std::vector<std::pair<uint32_t,uint32_t>> path;
-      if ( to_layer < 2 ){ elog("to_layer < 2"); return path; }
+      if ( to_layer < 2 ){ fc_elog(logger,"to_layer < 2"); return path; }
 
       auto index = from_block_num;
       auto current_layer = 2;
@@ -3380,24 +3384,24 @@ namespace eosio { namespace ibc {
    }
 
    digest_type get_merkle_node_value_in_full_sub_branch( const incremental_merkle& reference_inc_merkle, uint32_t layer, uint32_t index ){
-      if ( layer < 2 ){ elog("to_layer < 2"); return digest_type(); }
+      if ( layer < 2 ){ fc_elog(logger,"to_layer < 2"); return digest_type(); }
 
       if ( index & 0x1 ){
          auto max_layers = eosio::chain::detail::calcluate_max_depth( reference_inc_merkle._node_count );
          if ( layer < max_layers ){ // search in reference_inc_merkle first
             auto ret = get_inc_merkle_layer_left_node( reference_inc_merkle, layer );
             if ( ret != digest_type() ){
-               // ilog("access self inc_merkle ok");
+               // fc_ilog(logger,"access self inc_merkle ok");
                return ret;
             }
          }
 
-         // ilog("access self inc_merkle failed --");
+         // fc_ilog(logger,"access self inc_merkle failed --");
          auto inc_merkle = get_blockroot_merkle_by_num( (index << (layer - 1)) + 1 );
          return inc_merkle._active_nodes.front();
       } else {
          auto block_num = index << ( layer - 1 );
-         // ilog("access blockroot_merkle of block ${n}", ("n",block_num));
+         // fc_ilog(logger,"access blockroot_merkle of block ${n}", ("n",block_num));
          auto inc_merkle = get_blockroot_merkle_by_num( block_num );
          auto active_iter = inc_merkle._active_nodes.begin();
          auto block_id = get_block_id_by_num( block_num );
@@ -3418,7 +3422,7 @@ namespace eosio { namespace ibc {
 //      idump((from_block_num)(anchor_block_num));
 
       std::vector<digest_type> result;
-      if ( from_block_num >= anchor_block_num ){ elog("from_block_num must be less then anchor_block_num"); return result; } //important
+      if ( from_block_num >= anchor_block_num ){ fc_elog(logger,"from_block_num must be less then anchor_block_num"); return result; } //important
 
       auto anchor_block_inc_merkle = get_blockroot_merkle_by_num( anchor_block_num );
       uint32_t    full_root_layer;
@@ -3436,7 +3440,7 @@ namespace eosio { namespace ibc {
       auto position_path = get_merkle_path_positions_to_layer_in_full_branch( from_block_num, full_root_layer );
 
       if ( position_path.back().first != full_root_layer || position_path.back().second != full_root_index ){
-         elog("internal error! position_path.back() calculate failed");
+         fc_elog(logger,"internal error! position_path.back() calculate failed");
          return result;
       }
 
@@ -3465,7 +3469,7 @@ namespace eosio { namespace ibc {
    }
 
    bool verify_merkle_path( const std::vector<digest_type>& merkle_path ) {
-      if ( merkle_path.size() == 0 ){ elog("merkle_path is empty"); return false; }
+      if ( merkle_path.size() == 0 ){ fc_elog(logger,"merkle_path is empty"); return false; }
       if ( merkle_path.size() == 1 ){ return true; }
 
       digest_type result = digest_type::hash( make_canonical_pair(merkle_path[0], merkle_path[1]) );
@@ -3494,7 +3498,7 @@ namespace eosio { namespace ibc {
       auto head_slot = chain_plug->chain().fetch_block_by_number(head_num)->timestamp.slot;
 
       if ( head_slot < block_time_slot ){
-         elog( "unknown block_time_slot" );
+         fc_elog(logger,"unknown block_time_slot" );
          return 0;
       }
 
@@ -3507,7 +3511,7 @@ namespace eosio { namespace ibc {
       }
 
       if ( check_slot != block_time_slot ){
-         elog( "block of block_time_slot not found" );
+         fc_elog(logger,"block of block_time_slot not found" );
          return  0;
       }
 
@@ -3549,18 +3553,18 @@ namespace eosio { namespace ibc {
       }
 
       if ( merkle(trx_digests) != blk_ptr->transaction_mroot ){
-         elog("internal error");
+         fc_elog(logger,"internal error");
          return optional<ibc_trx_rich_info>();
       }
 
       if ( !found ){
-         elog("trx not found");
+         fc_elog(logger,"trx not found");
          return optional<ibc_trx_rich_info>();
       }
 
       auto mp = get_merkle_path( trx_digests, found_num );
       if ( mp.empty() ){
-         elog("internal error");
+         fc_elog(logger,"internal error");
          return optional<ibc_trx_rich_info>();
       }
 
@@ -3586,7 +3590,7 @@ namespace eosio { namespace ibc {
       if ( pchm_opt.valid() ){
          last_confirmed_orig_trx_block_time_slot = pchm_opt->last_confirmed_orig_trx_block_time_slot;
       } else {
-         elog("get_peer_chain_mutable failed");
+         fc_elog(logger,"get_peer_chain_mutable failed");
          return;
       }
 
@@ -3659,7 +3663,7 @@ namespace eosio { namespace ibc {
          cash_begin = local_cashtrxs.begin()->table_id;
          cash_end = local_cashtrxs.rbegin()->table_id;
       }
-      ilog("local_origtrxs id range [${of},${ot}], local_cashtrxs id range [${cf},${ct}]",("of",orig_begin)("ot",orig_end)("cf",cash_begin)("ct",cash_end));
+      fc_ilog(logger,"local_origtrxs id range [${of},${ot}], local_cashtrxs id range [${cf},${ct}]",("of",orig_begin)("ot",orig_end)("cf",cash_begin)("ct",cash_end));
 
       ///< ---- step 0: remove side effect of unapplied trxs ---- >///
       chain_plug->chain().abort_block();
@@ -3668,11 +3672,11 @@ namespace eosio { namespace ibc {
       check_if_remove_old_data_in_ibc_contracts();
 
       ///< ---- step 1: let lwcls in ibc.chain reach its minimum length ---- >///
-      ilog("step 1");
+      fc_ilog(logger,"step 1");
       
       auto opt_sctn = chain_contract->get_sections_tb_reverse_nth_section();
       if ( !opt_sctn.valid() ){
-         elog("internal error, can not get lwcls");
+         fc_elog(logger,"internal error, can not get lwcls");
          return;
       }
       section_type lwcls = *opt_sctn;
@@ -3680,7 +3684,7 @@ namespace eosio { namespace ibc {
       bool reached_min_length = true;
       name consensus = chain_contract->get_consensus_algo();
       if( consensus == name() || ( consensus != N(pipeline) && consensus != N(batch)) ){
-         elog("ibc.chain consensus config error");
+         fc_elog(logger,"ibc.chain consensus config error");
          return;
       }
 
@@ -3730,7 +3734,7 @@ namespace eosio { namespace ibc {
       }
 
       ///< ---- step two: fill related trx rich info according anchor block number ---- >///
-      ilog("step 2");
+      fc_ilog(logger,"step 2");
 
       uint32_t last_anchor_block_num = chain_contract->get_last_anchor_block_num();
       bool origtrxs_complete = false;
@@ -3752,7 +3756,7 @@ namespace eosio { namespace ibc {
          } else {
             auto itr = local_origtrxs.find( last_complete_origtrxs_rich_info_id );
             if ( itr == local_origtrxs.end() ){
-               elog("internal error!");
+               fc_elog(logger,"internal error!");
                return;
             }
             while ( itr != local_origtrxs.end() && itr->anchor_block_num != 0 ){
@@ -3764,7 +3768,7 @@ namespace eosio { namespace ibc {
          auto itr = local_origtrxs.lower_bound( last_complete_origtrxs_rich_info_id + 1 ); // the case with last_complete_origtrxs_rich_info_id == 0
          if ( itr == local_origtrxs.end() || itr->block_num > last_anchor_block_num ){
             origtrxs_complete = true;
-            ilog("origtrxs_complete = true;");
+            fc_ilog(logger,"origtrxs_complete = true;");
          } else {
             ibc_block_merkle_path_request_message bmp_req_msg;
             bmp_req_msg.table = N(origtrxs);
@@ -3803,7 +3807,7 @@ namespace eosio { namespace ibc {
          } else {
             auto itr = local_cashtrxs.find( last_complete_cashtrxs_rich_info_id );
             if ( itr == local_cashtrxs.end() ){
-               elog("internal error!");
+               fc_elog(logger,"internal error!");
                return;
             }
             while ( itr != local_cashtrxs.end() && itr->anchor_block_num != 0 ){
@@ -3815,7 +3819,7 @@ namespace eosio { namespace ibc {
          auto itr = local_cashtrxs.lower_bound( last_complete_cashtrxs_rich_info_id + 1 );
          if ( itr == local_cashtrxs.end() || itr->block_num > last_anchor_block_num ){
             cashtrxs_complete = true;
-            ilog("cashtrxs_complete = true;");
+            fc_ilog(logger,"cashtrxs_complete = true;");
          } else {
             ibc_block_merkle_path_request_message bmp_req_msg;
             bmp_req_msg.table = N(cashtrxs);
@@ -3844,7 +3848,7 @@ namespace eosio { namespace ibc {
       }
 
       ///< ---- step 3: push all transactions which should validate within this lwcls ---- >///
-      ilog("step 3");
+      fc_ilog(logger,"step 3");
 
       if ( consensus == N(pipeline) && lwcls.valid == false ){
          return;
@@ -3879,7 +3883,7 @@ namespace eosio { namespace ibc {
                   ++it;
                }
             } else { // maybe happen when restart ibc_plugin node
-               // ilog("can not find original transacton infomation form local_origtrxs");
+               // fc_ilog(logger,"can not find original transacton infomation form local_origtrxs");
                auto it_blk_num = local_origtrxs.get<by_block_num>().lower_bound( cash_opt->orig_trx_block_num + 1 );
                it = local_origtrxs.project<0>(it_blk_num);
                while ( it != local_origtrxs.end() ){
@@ -3889,7 +3893,7 @@ namespace eosio { namespace ibc {
                   ++it;
                }
             }
-         } else { ilog("internal error, failed to get cash transaction information of seq_num ${n}",("n",range.second)); }
+         } else { fc_ilog(logger,"internal error, failed to get cash transaction information of seq_num ${n}",("n",range.second)); }
       }
 
       if ( ! orig_trxs_to_push.empty() ){
@@ -3910,7 +3914,7 @@ namespace eosio { namespace ibc {
             times += 1;
          }
          if ( times <= 3 ){
-            ilog("---------orig_trxs_to_push to push size ${n}, retry times ${try}",("n",to_push.size())("try",times));
+            fc_ilog(logger,"---------orig_trxs_to_push to push size ${n}, retry times ${try}",("n",to_push.size())("try",times));
             token_contract->push_cash_trxs( to_push, range.second + 1 );
          }
       }
@@ -3918,7 +3922,7 @@ namespace eosio { namespace ibc {
       ///< --- local_cashtrxs --- >///
       auto gm_opt = token_contract->get_peer_chain_mutable();
       if ( !gm_opt.valid() ){
-         elog("internal error, failed to get global_mutable_singleton");
+         fc_elog(logger,"internal error, failed to get global_mutable_singleton");
          return;
       }
       uint32_t last_cash_seq_num = gm_opt->cash_seq_num;
@@ -3931,7 +3935,7 @@ namespace eosio { namespace ibc {
             // cashconfirm action can't jump, must push according to the serial number
             // so, return directly here
             // this may be caused by start a new relay-relay channel when other relay-relay channel is working
-            wlog("============= cashconfirm action can't jump, return directly =============");
+            fc_wlog(logger,"============= cashconfirm action can't jump, return directly =============");
             return;  // important!
          }
       }
@@ -3948,13 +3952,13 @@ namespace eosio { namespace ibc {
          } else {
             to_push = cash_trxs_to_push;
          }
-         ilog("---------cash_trxs_to_push to push size ${n}",("n",to_push.size()));
+         fc_ilog(logger,"---------cash_trxs_to_push to push size ${n}",("n",to_push.size()));
          token_contract->push_cashconfirm_trxs( to_push, last_cash_seq_num + 1 );
          return;
       }
 
       ///< ---- step 4: check if all related trxs about lwcls in local_origtrxs and local_cashtrxs have handled ---- >///
-      ilog("step 4");
+      fc_ilog(logger,"step 4");
 
       bool orig_b = false, cash_b = false;
 
@@ -3969,7 +3973,7 @@ namespace eosio { namespace ibc {
       } else {
          auto actn_params_opt = token_contract->get_cash_action_params( cash_trxs_to_push.back().packed_trx_receipt );
          if ( ! actn_params_opt.valid() ){
-            elog("internal error, failed to get_cash_action_params");
+            fc_elog(logger,"internal error, failed to get_cash_action_params");
             return;
          }
          if ( gm_opt->cash_seq_num == actn_params_opt->seq_num ){
@@ -3984,7 +3988,7 @@ namespace eosio { namespace ibc {
 
 
       ///< ---- step 5: if has new local_origtrxs, local_cashtrxs or new_prod_blk_num, request the next section ---- >///
-      ilog("step 5");
+      fc_ilog(logger,"step 5");
 
       {
          uint32_t start_blk_num = 0;
@@ -4005,7 +4009,7 @@ namespace eosio { namespace ibc {
                } else {
                   start_blk_num = (--local_origtrxs.end())->block_num;
                }
-               ilog("origtrxs has new trxs, start block ${n}",("n",start_blk_num));
+               fc_ilog(logger,"origtrxs has new trxs, start block ${n}",("n",start_blk_num));
             }
 
             // --- check local_cashtrxs ---
@@ -4017,7 +4021,7 @@ namespace eosio { namespace ibc {
                } else {
                   start_blk_num = std::max( start_blk_num, (--local_cashtrxs.end())->block_num );
                }
-               ilog("cashtrxs has new trxs, start block ${n}",("n",start_blk_num));
+               fc_ilog(logger,"cashtrxs has new trxs, start block ${n}",("n",start_blk_num));
             }
          }
 
@@ -4062,14 +4066,14 @@ namespace eosio { namespace ibc {
       } else {
          // when reconnect with peer plugin node
          i = 0;
-         elog("count_open_sockets() == 0");
+         fc_elog(logger,"count_open_sockets() == 0");
       }
 
       ibc_core_timer->expires_from_now( ibc_core_interval );
       ibc_core_timer->async_wait( [this](boost::system::error_code ec) {
          start_ibc_core_timer();
          if( ec) {
-            wlog ("start_ibc_core_timer error: ${m}", ("m", ec.message()));
+            fc_wlog(logger,"start_ibc_core_timer error: ${m}", ("m", ec.message()));
          }
       });
    }
@@ -4106,20 +4110,20 @@ namespace eosio { namespace ibc {
             connection_monitor(from_connection);
          }
          else {
-            elog( "Error from connection check monitor: ${m}",( "m", ec.message()));
+            fc_elog(logger,"Error from connection check monitor: ${m}",( "m", ec.message()));
             start_conn_timer( connector_period, std::weak_ptr<connection>());
          }
       });
    }
 
    void ibc_plugin_impl::start_monitors() {
-      connector_check.reset(new boost::asio::steady_timer( app().get_io_service()));
+      connector_check.reset(new boost::asio::steady_timer( my_impl->thread_pool->get_executor() ));
       start_conn_timer(connector_period, std::weak_ptr<connection>());
 
-      ibc_heartbeat_timer.reset(new boost::asio::steady_timer( app().get_io_service()));
+      ibc_heartbeat_timer.reset(new boost::asio::steady_timer( my_impl->thread_pool->get_executor() ));
       start_ibc_heartbeat_timer();
 
-      ibc_core_timer.reset(new boost::asio::steady_timer( app().get_io_service()));
+      ibc_core_timer.reset(new boost::asio::steady_timer( my_impl->thread_pool->get_executor() ));
       start_ibc_core_timer();
    }
 
@@ -4128,7 +4132,7 @@ namespace eosio { namespace ibc {
       keepalive_timer->async_wait ([this](boost::system::error_code ec) {
          ticker ();
          if (ec) {
-            wlog ("Peer keepalive ticked sooner than expected: ${m}", ("m", ec.message()));
+            fc_wlog(logger,"Peer keepalive ticked sooner than expected: ${m}", ("m", ec.message()));
          }
          for (auto &c : connections ) {
             if (c->socket->is_open()) {
@@ -4150,7 +4154,7 @@ namespace eosio { namespace ibc {
          auto private_it = private_keys.find(msg.key);
 
          if( allowed_it == allowed_peers.end() && private_it == private_keys.end() ) {
-            elog( "Peer ${peer} sent a handshake with an unauthorized key: ${key}.",
+            fc_elog(logger,"Peer ${peer} sent a handshake with an unauthorized key: ${key}.",
                   ("peer", msg.p2p_address)("key", msg.key));
             return false;
          }
@@ -4160,7 +4164,7 @@ namespace eosio { namespace ibc {
       sc::system_clock::duration msg_time(msg.time);
       auto time = sc::system_clock::now().time_since_epoch();
       if(time - msg_time > peer_authentication_interval) {
-         elog( "Peer ${peer} sent a handshake with a timestamp skewed by more than ${time}.",
+         fc_elog(logger,"Peer ${peer} sent a handshake with a timestamp skewed by more than ${time}.",
                ("peer", msg.p2p_address)("time", "1 second")); // TODO Add to_variant for std::chrono::system_clock::duration
          return false;
       }
@@ -4168,7 +4172,7 @@ namespace eosio { namespace ibc {
       if(msg.sig != chain::signature_type() && msg.token != sha256()) {
          sha256 hash = fc::sha256::hash(msg.time);
          if(hash != msg.token) {
-            elog( "Peer ${peer} sent a handshake with an invalid token.",
+            fc_elog(logger,"Peer ${peer} sent a handshake with an invalid token.",
                   ("peer", msg.p2p_address));
             return false;
          }
@@ -4177,18 +4181,18 @@ namespace eosio { namespace ibc {
             peer_key = crypto::public_key(msg.sig, msg.token, true);
          }
          catch (fc::exception& /*e*/) {
-            elog( "Peer ${peer} sent a handshake with an unrecoverable key.",
+            fc_elog(logger,"Peer ${peer} sent a handshake with an unrecoverable key.",
                   ("peer", msg.p2p_address));
             return false;
          }
          if((allowed_connections & Specified) && peer_key != msg.key) {
-            elog( "Peer ${peer} sent a handshake with an unauthenticated key.",
+            fc_elog(logger,"Peer ${peer} sent a handshake with an unauthenticated key.",
                   ("peer", msg.p2p_address));
             return false;
          }
       }
       else if(allowed_connections & Specified) {
-         dlog( "Peer sent a handshake with blank signature and token, but this node accepts only authenticated connections.");
+         fc_dlog(logger,"Peer sent a handshake with blank signature and token, but this node accepts only authenticated connections.");
          return false;
       }
       return true;
@@ -4247,7 +4251,7 @@ namespace eosio { namespace ibc {
             hello.last_irreversible_block_id = cc.get_block_id_for_num(hello.last_irreversible_block_num);
          }
          catch( const unknown_block_exception &ex) {
-            ilog("caught unkown_block");
+            fc_ilog(logger,"caught unkown_block");
             hello.last_irreversible_block_num = 0;
          }
       }
@@ -4316,19 +4320,19 @@ namespace eosio { namespace ibc {
 #define OPTION_ASSERT( option ) EOS_ASSERT( options.count( option ) && options.at( option ).as<string>() != string(), chain::plugin_config_exception, option " not specified" );
 
    void ibc_plugin::plugin_initialize( const variables_map& options ) {
-      ilog("Initialize ibc plugin");
+      fc_ilog(logger,"Initialize ibc plugin");
       try {
          OPTION_ASSERT( "ibc-chain-contract" )
          my->chain_contract.reset( new ibc_chain_contract( eosio::chain::name{ options.at("ibc-chain-contract").as<string>()}));
-         ilog( "ibc chain contract account is ${name}", ("name",  options.at("ibc-chain-contract").as<string>()));
+         fc_ilog(logger,"ibc chain contract account is ${name}", ("name",  options.at("ibc-chain-contract").as<string>()));
 
          OPTION_ASSERT( "ibc-token-contract" )
          my->token_contract.reset( new ibc_token_contract( eosio::chain::name{ options.at("ibc-token-contract").as<string>()}));
-         ilog( "ibc token contract account is ${name}", ("name",  options.at("ibc-token-contract").as<string>()));
+         fc_ilog(logger,"ibc token contract account is ${name}", ("name",  options.at("ibc-token-contract").as<string>()));
 
          OPTION_ASSERT( "ibc-relay-name" )
          my->relay = eosio::chain::name{ options.at("ibc-relay-name").as<string>() };
-         ilog( "ibc relay account is ${name}", ("name",  options.at("ibc-relay-name").as<string>()));
+         fc_ilog(logger,"ibc relay account is ${name}", ("name",  options.at("ibc-relay-name").as<string>()));
 
          auto get_key = [=]( string key_spec_pair ) -> std::pair<public_key_type,private_key_type> {
             auto delim = key_spec_pair.find("=");
@@ -4349,22 +4353,22 @@ namespace eosio { namespace ibc {
          try {
             auto key = get_key( key_spec_pair );
             my->relay_private_key = key.second;
-            ilog( "ibc relay public key is ${key}", ("key", key.first));
+            fc_ilog(logger,"ibc relay public key is ${key}", ("key", key.first));
          } catch (...) {
             EOS_ASSERT( false, chain::plugin_config_exception, "Malformed ibc-relay-private-key: \"${val}\"", ("val", key_spec_pair));
          }
 
-         my->resolver = std::make_shared<tcp::resolver>( std::ref( app().get_io_service()));
+         my->resolver = std::make_shared<tcp::resolver>( my_impl->thread_pool->get_executor() );
 
          if( options.count( "ibc-listen-endpoint" )) {
             my->p2p_address = options.at( "ibc-listen-endpoint" ).as<string>();
             auto host = my->p2p_address.substr( 0, my->p2p_address.find( ':' ));
             auto port = my->p2p_address.substr( host.size() + 1, my->p2p_address.size());
-            ilog("ibc listen endpoint is ${h}:${p}",("h", host )("p", port));
+            fc_ilog(logger,"ibc listen endpoint is ${h}:${p}",("h", host )("p", port));
             tcp::resolver::query query( tcp::v4(), host.c_str(), port.c_str());
 
             my->listen_endpoint = *my->resolver->resolve( query );
-            my->acceptor.reset( new tcp::acceptor( app().get_io_service()));
+            my->acceptor.reset( new tcp::acceptor( my_impl->thread_pool->get_executor() ));
          }
 
          if( options.count( "ibc-server-address" )) {
@@ -4386,7 +4390,7 @@ namespace eosio { namespace ibc {
          }
 
          my->peerchain_id = fc::sha256( options.at( "ibc-peer-chain-id" ).as<string>() );
-         ilog( "ibc peer chain id is ${id}", ("id",  my->peerchain_id.str()));
+         fc_ilog(logger,"ibc peer chain id is ${id}", ("id",  my->peerchain_id.str()));
 
          if( options.count( "ibc-peer-address" )) {
             my->supplied_peers = options.at( "ibc-peer-address" ).as<vector<string> >();
@@ -4420,7 +4424,7 @@ namespace eosio { namespace ibc {
                   auto key = get_key( key_spec_pair );
                   my->private_keys[key.first] = key.second;
                } catch (...) {
-                  elog("Malformed ibc-peer-private-key: \"${val}\", ignoring!", ("val", key_spec_pair));
+                  fc_elog(logger,"Malformed ibc-peer-private-key: \"${val}\", ignoring!", ("val", key_spec_pair));
                }
             }
          }
@@ -4441,23 +4445,27 @@ namespace eosio { namespace ibc {
 
          fc::rand_pseudo_bytes( my->node_id.data(), my->node_id.data_size());
 
-         my->keepalive_timer.reset( new boost::asio::steady_timer( app().get_io_service()));
+         my->keepalive_timer.reset( new boost::asio::steady_timer( my_impl->thread_pool->get_executor() ));
          my->ticker();
       } FC_LOG_AND_RETHROW()
    }
 
    void ibc_plugin::plugin_startup() {
+
+       // currently thread_pool only used for server_ioc
+      my_impl->thread_pool.emplace( "net", my->thread_pool_size );
+
       if( my->acceptor ) {
          my->acceptor->open(my->listen_endpoint.protocol());
          my->acceptor->set_option(tcp::acceptor::reuse_address(true));
          try {
             my->acceptor->bind(my->listen_endpoint);
          } catch (const std::exception& e) {
-            ilog("ibc_plugin::plugin_startup failed to bind to port ${port}", ("port", my->listen_endpoint.port()));
+            fc_ilog(logger,"ibc_plugin::plugin_startup failed to bind to port ${port}", ("port", my->listen_endpoint.port()));
             throw e;
          }
          my->acceptor->listen();
-         ilog("starting ibc plugin listener, max clients is ${mc}",("mc",my->max_client_count));
+         fc_ilog(logger,"starting ibc plugin listener, max clients is ${mc}",("mc",my->max_client_count));
          my->start_listen_loop();
       }
       chain::controller&cc = my->chain_plug->chain();
@@ -4468,20 +4476,22 @@ namespace eosio { namespace ibc {
       for( auto seed_node : my->supplied_peers ) {
          connect( seed_node );
       }
+      handle_sighup();
+   }
 
-      if(fc::get_logger_map().find(logger_name) != fc::get_logger_map().end())
-         logger = fc::get_logger_map()[logger_name];
+   void ibc_plugin::handle_sighup() {
+      fc::logger::update( logger_name, logger );
    }
 
    void ibc_plugin::plugin_shutdown() {
       try {
-         ilog( "shutdown.." );
+         fc_ilog(logger,"shutdown.." );
          my->done = true;
          if( my->acceptor ) {
-            ilog( "close acceptor" );
+            fc_ilog(logger,"close acceptor" );
             my->acceptor->close();
 
-            ilog( "close ${s} connections",( "s",my->connections.size()) );
+            fc_ilog(logger,"close ${s} connections",( "s",my->connections.size()) );
             auto cons = my->connections;
             for( auto con : cons ) {
                my->close( con);
@@ -4489,7 +4499,11 @@ namespace eosio { namespace ibc {
 
             my->acceptor.reset(nullptr);
          }
-         ilog( "exit shutdown" );
+
+             if( my_impl->thread_pool ) {
+            my_impl->thread_pool->stop();
+         }
+         fc_ilog(logger,"exit shutdown" );
       }
       FC_CAPTURE_AND_RETHROW()
    }
