@@ -3169,7 +3169,7 @@ namespace eosio { namespace ibc {
       ibc_heartbeat_timer->async_wait ([this](boost::system::error_code ec) {
          start_ibc_heartbeat_timer();
          if (ec) {
-            wlog(logger,"start_ibc_heartbeat_timer error: ${m}", ("m", ec.message()));
+            fc_wlog(logger,"start_ibc_heartbeat_timer error: ${m}", ("m", ec.message()));
          }
       });
    }
@@ -4073,7 +4073,7 @@ namespace eosio { namespace ibc {
       ibc_core_timer->async_wait( [this](boost::system::error_code ec) {
          start_ibc_core_timer();
          if( ec) {
-            wlog(logger,"start_ibc_core_timer error: ${m}", ("m", ec.message()));
+            fc_wlog(logger,"start_ibc_core_timer error: ${m}", ("m", ec.message()));
          }
       });
    }
@@ -4132,7 +4132,7 @@ namespace eosio { namespace ibc {
       keepalive_timer->async_wait ([this](boost::system::error_code ec) {
          ticker ();
          if (ec) {
-            wlog(logger,"Peer keepalive ticked sooner than expected: ${m}", ("m", ec.message()));
+            fc_wlog(logger,"Peer keepalive ticked sooner than expected: ${m}", ("m", ec.message()));
          }
          for (auto &c : connections ) {
             if (c->socket->is_open()) {
