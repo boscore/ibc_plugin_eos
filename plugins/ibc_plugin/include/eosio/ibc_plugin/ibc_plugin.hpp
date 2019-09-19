@@ -3,10 +3,8 @@
  *  @copyright defined in bos/LICENSE.txt
  */
 #pragma once
-
 #include <appbase/application.hpp>
 #include <eosio/chain_plugin/chain_plugin.hpp>
-#include <eosio/chain/plugin_interface.hpp>
 #include <eosio/ibc_plugin/protocol.hpp>
 
 namespace eosio { namespace ibc {
@@ -40,7 +38,7 @@ namespace eosio { namespace ibc {
 
         size_t num_peers() const;
       private:
-        std::unique_ptr<class ibc_plugin_impl> my;
+        std::shared_ptr<class ibc_plugin_impl> my;
    };
 
 

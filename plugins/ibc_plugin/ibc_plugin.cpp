@@ -117,6 +117,7 @@ namespace eosio { namespace ibc {
       unique_ptr<tcp::acceptor>        acceptor;
       tcp::endpoint                    listen_endpoint;
       string                           p2p_address;
+      string                           p2p_server_address;
       uint32_t                         max_client_count = 0;
       uint32_t                         max_nodes_per_host = 1;
       uint32_t                         num_clients = 0;
@@ -176,7 +177,7 @@ namespace eosio { namespace ibc {
       shared_ptr<tcp::resolver>     resolver;
 
       bool                          use_socket_read_watermark = false;
-  uint16_t                                  thread_pool_size = 1;
+      uint16_t                      thread_pool_size = 1;
       optional<eosio::chain::named_thread_pool> thread_pool;
       void connect( connection_ptr c );
       void connect( connection_ptr c, tcp::resolver::iterator endpoint_itr );
@@ -4219,11 +4220,12 @@ namespace eosio { namespace ibc {
    
    //--------------- handshake_initializer ---------------
    void handshake_initializer::populate( handshake_message &hello) {
+      namespace sc = std::chrono;
       hello.network_version = net_version;
       hello.chain_id = my_impl->chain_id;
       hello.node_id = my_impl->node_id;
       hello.key = my_impl->get_authentication_key();
-      hello.time = std::chrono::system_clock::now().time_since_epoch().count();
+      hello.time = sc::duration_cast<sc::nanoseconds>(sc::system_clock::now().time_since_epoch()).count();
       hello.token = fc::sha256::hash(hello.time);
       hello.sig = my_impl->sign_compact(hello.key, hello.token);
       // If we couldn't sign, don't send a token.
@@ -4241,17 +4243,18 @@ namespace eosio { namespace ibc {
 #endif
       hello.agent = my_impl->user_agent_name;
 
+
       controller& cc = my_impl->chain_plug->chain();
       hello.head_id = fc::sha256();
       hello.last_irreversible_block_id = fc::sha256();
-      hello.head_num = cc.fork_db_head_block_num();
+      hello.head_num = cc.fork_db_pending_head_block_num();
       hello.last_irreversible_block_num = cc.last_irreversible_block_num();
       if( hello.last_irreversible_block_num ) {
          try {
             hello.last_irreversible_block_id = cc.get_block_id_for_num(hello.last_irreversible_block_num);
          }
          catch( const unknown_block_exception &ex) {
-            fc_ilog(logger,"caught unkown_block");
+            fc_wlog( logger, "caught unkown_block" );
             hello.last_irreversible_block_num = 0;
          }
       }
@@ -4260,7 +4263,7 @@ namespace eosio { namespace ibc {
             hello.head_id = cc.get_block_id_for_num( hello.head_num );
          }
          catch( const unknown_block_exception &ex) {
-            hello.head_num = 0;
+           hello.head_num = 0;
          }
       }
    }
@@ -4309,7 +4312,7 @@ namespace eosio { namespace ibc {
            "   _port  \tremote port number of peer\n\n"
            "   _lip   \tlocal IP address connected to peer\n\n"
            "   _lport \tlocal port number connected to peer\n\n")
-         ;
+        ;
    }
 
    template<typename T>
@@ -4358,31 +4361,12 @@ namespace eosio { namespace ibc {
             EOS_ASSERT( false, chain::plugin_config_exception, "Malformed ibc-relay-private-key: \"${val}\"", ("val", key_spec_pair));
          }
 
-         my->resolver = std::make_shared<tcp::resolver>( my_impl->thread_pool->get_executor() );
-
-         if( options.count( "ibc-listen-endpoint" )) {
+         if( options.count( "ibc-listen-endpoint" ) && options.at( "ibc-listen-endpoint" ).as<string>().length()) {
             my->p2p_address = options.at( "ibc-listen-endpoint" ).as<string>();
-            auto host = my->p2p_address.substr( 0, my->p2p_address.find( ':' ));
-            auto port = my->p2p_address.substr( host.size() + 1, my->p2p_address.size());
-            fc_ilog(logger,"ibc listen endpoint is ${h}:${p}",("h", host )("p", port));
-            tcp::resolver::query query( tcp::v4(), host.c_str(), port.c_str());
-
-            my->listen_endpoint = *my->resolver->resolve( query );
-            my->acceptor.reset( new tcp::acceptor( my_impl->thread_pool->get_executor() ));
          }
 
          if( options.count( "ibc-server-address" )) {
-            my->p2p_address = options.at( "ibc-server-address" ).as<string>();
-         } else {
-            if( my->listen_endpoint.address().to_v4() == address_v4::any()) {
-               boost::system::error_code ec;
-               auto host = host_name( ec );
-               if( ec.value() != boost::system::errc::success ) {
-                  FC_THROW_EXCEPTION( fc::invalid_arg_exception, "Unable to retrieve host_name. ${msg}", ("msg", ec.message()));
-               }
-               auto port = my->p2p_address.substr( my->p2p_address.find( ':' ), my->p2p_address.size());
-               my->p2p_address = host + port;
-            }
+            my->p2p_server_address = options.at( "ibc-server-address" ).as<string>();
          }
 
          if( options.count( "ibc-agent-name" )) {
@@ -4417,7 +4401,7 @@ namespace eosio { namespace ibc {
             }
          }
 
-         if( options.count("ibc-peer_private-key") ) {
+         if( options.count("ibc-peer-private-key") ) {
             const std::vector<std::string> key_spec_pairs = options["ibc-peer-private-key"].as<std::vector<std::string>>();
             for (const auto& key_spec_pair : key_spec_pairs) {
                try {
@@ -4442,34 +4426,66 @@ namespace eosio { namespace ibc {
          my->chain_plug = app().find_plugin<chain_plugin>();
          EOS_ASSERT( my->chain_plug, chain::missing_chain_plugin_exception, "missing chain plugin");
          my->chain_id = app().get_plugin<chain_plugin>().get_chain_id();
-
          fc::rand_pseudo_bytes( my->node_id.data(), my->node_id.data_size());
 
-         my->keepalive_timer.reset( new boost::asio::steady_timer( my_impl->thread_pool->get_executor() ));
-         my->ticker();
       } FC_LOG_AND_RETHROW()
    }
 
    void ibc_plugin::plugin_startup() {
 
-       // currently thread_pool only used for server_ioc
-      my_impl->thread_pool.emplace( "net", my->thread_pool_size );
+      // currently thread_pool only used for server_ioc
+      my->thread_pool.emplace( "ibc", my->thread_pool_size );
+
+      shared_ptr<tcp::resolver> resolver = std::make_shared<tcp::resolver>( my_impl->thread_pool->get_executor() );
+      if( my->p2p_address.size() > 0 ) {
+         auto host = my->p2p_address.substr( 0, my->p2p_address.find( ':' ));
+         auto port = my->p2p_address.substr( host.size() + 1, my->p2p_address.size());
+         tcp::resolver::query query( tcp::v4(), host.c_str(), port.c_str());
+         // Note: need to add support for IPv6 too?
+
+         my->listen_endpoint = *resolver->resolve( query );
+
+         my->acceptor.reset( new tcp::acceptor( my_impl->thread_pool->get_executor() ) );
+
+         if( !my->p2p_server_address.empty() ) {
+            my->p2p_address = my->p2p_server_address;
+         } else {
+            if( my->listen_endpoint.address().to_v4() == address_v4::any()) {
+               boost::system::error_code ec;
+               auto host = host_name( ec );
+               if( ec.value() != boost::system::errc::success ) {
+
+                  FC_THROW_EXCEPTION( fc::invalid_arg_exception,
+                                      "Unable to retrieve host_name. ${msg}", ("msg", ec.message()));
+
+               }
+               auto port = my->p2p_address.substr( my->p2p_address.find( ':' ), my->p2p_address.size());
+               my->p2p_address = host + port;
+            }
+         }
+      }
+
+      my->keepalive_timer.reset( new boost::asio::steady_timer( my->thread_pool->get_executor() ) );
+      my->ticker();
 
       if( my->acceptor ) {
          my->acceptor->open(my->listen_endpoint.protocol());
          my->acceptor->set_option(tcp::acceptor::reuse_address(true));
          try {
-            my->acceptor->bind(my->listen_endpoint);
+           my->acceptor->bind(my->listen_endpoint);
          } catch (const std::exception& e) {
-            fc_ilog(logger,"ibc_plugin::plugin_startup failed to bind to port ${port}", ("port", my->listen_endpoint.port()));
-            throw e;
+           fc_elog( logger, "ibc_plugin::plugin_startup failed to bind to port ${port}",
+                    ("port", my->listen_endpoint.port()));
+           throw e;
          }
          my->acceptor->listen();
-         fc_ilog(logger,"starting ibc plugin listener, max clients is ${mc}",("mc",my->max_client_count));
+         fc_ilog( logger, "starting listener, max clients is ${mc}",("mc",my->max_client_count) );
          my->start_listen_loop();
       }
       chain::controller&cc = my->chain_plug->chain();
-      cc.irreversible_block.connect( boost::bind(&ibc_plugin_impl::irreversible_block, my.get(), _1));
+      {
+         cc.irreversible_block.connect(  boost::bind(&ibc_plugin_impl::irreversible_block, my.get(), _1));
+      }
 
       my->start_monitors();
 
@@ -4485,25 +4501,33 @@ namespace eosio { namespace ibc {
 
    void ibc_plugin::plugin_shutdown() {
       try {
-         fc_ilog(logger,"shutdown.." );
+         fc_ilog( logger, "shutdown.." );
+         if( my->connector_check )
+            my->connector_check->cancel();
+         if( my->keepalive_timer )
+            my->keepalive_timer->cancel();
+
          my->done = true;
          if( my->acceptor ) {
-            fc_ilog(logger,"close acceptor" );
+            fc_ilog( logger, "close acceptor" );
+            my->acceptor->cancel();
             my->acceptor->close();
 
-            fc_ilog(logger,"close ${s} connections",( "s",my->connections.size()) );
-            auto cons = my->connections;
-            for( auto con : cons ) {
-               my->close( con);
+            fc_ilog( logger, "close ${s} connections",( "s",my->connections.size()) );
+            for( auto& con : my->connections ) {
+               fc_dlog( logger, "close: ${p}", ("p",con->peer_name()) );
+               my->close( con );
             }
-
-            my->acceptor.reset(nullptr);
+            my->connections.clear();
          }
 
-             if( my_impl->thread_pool ) {
-            my_impl->thread_pool->stop();
+         if( my->thread_pool ) {
+            my->thread_pool->stop();
          }
-         fc_ilog(logger,"exit shutdown" );
+
+         app().post( 0, [me = my](){} ); // keep my pointer alive until queue is drained
+
+         fc_ilog( logger, "exit shutdown" );
       }
       FC_CAPTURE_AND_RETHROW()
    }
@@ -4531,6 +4555,7 @@ namespace eosio { namespace ibc {
       for( auto itr = my->connections.begin(); itr != my->connections.end(); ++itr ) {
          if( (*itr)->peer_addr == host ) {
             (*itr)->reset();
+            fc_ilog( logger, "disconnecting: ${p}", ("p", (*itr)->peer_name()) );
             my->close(*itr);
             my->connections.erase(itr);
             return "connection removed";
