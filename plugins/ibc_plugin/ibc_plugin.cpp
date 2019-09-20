@@ -2360,9 +2360,9 @@ namespace eosio { namespace ibc {
          controller &cc = chain_plug->chain();
          uint32_t head_num = cc.fork_db_head_block_num();
 
-         uint32_t depth = 64;
+         int depth = 64;
          block_state_ptr p;
-         while ( p == block_state_ptr() && depth >= 1 ){
+         while ( p == block_state_ptr() && depth >= 0 ){
             uint32_t check_num = head_num - depth;
             p = cc.fetch_block_state_by_number( check_num );
 
