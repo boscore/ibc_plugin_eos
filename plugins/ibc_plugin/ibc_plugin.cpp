@@ -3471,7 +3471,8 @@ namespace eosio { namespace ibc {
       }
 
       // get block number from block_time_slot
-      uint32_t check_num = head_num - ( head_slot - block_time_slot );
+      uint32_t diff = head_slot - block_time_slot;
+      uint32_t check_num = head_num > diff ? head_num - diff : 1;
       uint32_t check_slot = chain_plug->chain().fetch_block_by_number(check_num)->timestamp.slot;
       while ( check_slot < block_time_slot ){
          check_num += 1;
