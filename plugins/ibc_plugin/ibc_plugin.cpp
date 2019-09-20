@@ -19,7 +19,6 @@
 #include <fc/io/json.hpp>
 #include <fc/io/raw.hpp>
 #include <fc/log/appender.hpp>
-#include <fc/container/flat.hpp>
 #include <fc/log/logger_config.hpp>
 #include <fc/reflect/variant.hpp>
 #include <fc/crypto/rand.hpp>
@@ -28,13 +27,8 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ip/host_name.hpp>
 #include <boost/asio/steady_timer.hpp>
-#include <boost/intrusive/set.hpp>
 
 using namespace eosio::chain::plugin_interface::compat;
-
-namespace fc {
-   extern std::unordered_map<std::string,logger>& get_logger_map();
-}
 
 namespace eosio { namespace ibc {
    static appbase::abstract_plugin& _ibc_plugin = app().register_plugin<ibc_plugin>();
@@ -44,7 +38,6 @@ namespace eosio { namespace ibc {
    using boost::asio::ip::tcp;
    using boost::asio::ip::address_v4;
    using boost::asio::ip::host_name;
-   using boost::intrusive::rbtree;
    using boost::multi_index_container;
 
    using fc::time_point;
@@ -71,6 +64,7 @@ namespace eosio { namespace ibc {
    
    using connection_ptr = std::shared_ptr<connection>;
    using connection_wptr = std::weak_ptr<connection>;
+
    using socket_ptr = std::shared_ptr<tcp::socket>;
    using io_work_t = boost::asio::executor_work_guard<boost::asio::io_context::executor_type>;
    using ibc_message_ptr = shared_ptr<ibc_message>;
@@ -124,7 +118,8 @@ namespace eosio { namespace ibc {
 
       vector<string>                   supplied_peers;
       vector<chain::public_key_type>   allowed_peers; ///< peer keys allowed to connect
-      std::map<chain::public_key_type, chain::private_key_type> private_keys; 
+      std::map<chain::public_key_type,
+               chain::private_key_type> private_keys; 
 
       enum possible_connections : char {
          None = 0,
@@ -177,29 +172,23 @@ namespace eosio { namespace ibc {
       shared_ptr<tcp::resolver>     resolver;
 
       bool                          use_socket_read_watermark = false;
-      uint16_t                      thread_pool_size = 1;
+      uint16_t                                  thread_pool_size = 1;
       optional<eosio::chain::named_thread_pool> thread_pool;
-      void connect( connection_ptr c );
-      void connect( connection_ptr c, tcp::resolver::iterator endpoint_itr );
-      bool start_session( connection_ptr c );
+      void connect(const connection_ptr& c );
+      void connect(const connection_ptr& c, tcp::resolver::iterator endpoint_itr );
+      bool start_session(const connection_ptr& c);
       void start_listen_loop( );
-      void start_read_message( connection_ptr c );
+      void start_read_message(const connection_ptr& c );
 
-      void   close( connection_ptr c );
+      void   close(const connection_ptr& c );
       size_t count_open_sockets() const;
-
-      template<typename VerifierFunc>
-      void send_all( const ibc_message& msg, VerifierFunc verify );
-      void send_all( const ibc_message& msg );
-
-      void accepted_block_header(const block_state_ptr&);
-      void accepted_block(const block_state_ptr&);
+      
       void irreversible_block(const block_state_ptr&);
 
       bool is_valid( const handshake_message &msg);
 
-      void handle_message( connection_ptr c, const handshake_message &msg);
-      void handle_message( connection_ptr c, const go_away_message &msg );
+      void handle_message(const connection_ptr& c, const handshake_message &msg);
+      void handle_message(const connection_ptr& c, const go_away_message &msg );
 
       /** Process time_message
        * Calculate offset, delay and dispersion.  Note carefully the
@@ -209,18 +198,18 @@ namespace eosio { namespace ibc {
        * floating-double arithmetic with rounding done by the hardware.
        * This is necessary in order to avoid overflow and preserve precision.
        */
-      void handle_message( connection_ptr c, const time_message &msg);
+      void handle_message(const connection_ptr& c, const time_message& msg);
 
-      void handle_message( connection_ptr c, const ibc_heartbeat_message &msg);
-      void handle_message( connection_ptr c, const lwc_init_message &msg);
-      void handle_message( connection_ptr c, const lwc_section_request_message &msg);
-      void handle_message( connection_ptr c, const lwc_section_data_message &msg);
-      void handle_message( connection_ptr c, const lwc_block_commits_request_message &msg);
-      void handle_message( connection_ptr c, const lwc_block_commits_data_message &msg);
-      void handle_message( connection_ptr c, const ibc_trxs_request_message &msg);
-      void handle_message( connection_ptr c, const ibc_trxs_data_message &msg);
-      void handle_message( connection_ptr c, const ibc_block_merkle_path_request_message &msg);
-      void handle_message( connection_ptr c, const ibc_block_merkle_path_data_message &msg);
+      void handle_message(const connection_ptr& c, const ibc_heartbeat_message &msg);
+      void handle_message(const connection_ptr& c, const lwc_init_message &msg);
+      void handle_message(const connection_ptr& c, const lwc_section_request_message &msg);
+      void handle_message(const connection_ptr& c, const lwc_section_data_message &msg);
+      void handle_message(const connection_ptr& c, const lwc_block_commits_request_message &msg);
+      void handle_message(const connection_ptr& c, const lwc_block_commits_data_message &msg);
+      void handle_message(const connection_ptr& c, const ibc_trxs_request_message &msg);
+      void handle_message(const connection_ptr& c, const ibc_trxs_data_message &msg);
+      void handle_message(const connection_ptr& c, const ibc_block_merkle_path_request_message &msg);
+      void handle_message(const connection_ptr& c, const ibc_block_merkle_path_data_message &msg);
 
       lwc_section_type sum_received_lwcls_info( );
       bool is_head_catchup( );
@@ -275,7 +264,7 @@ namespace eosio { namespace ibc {
    const fc::string logger_name("ibc_plugin_impl");
    fc::logger logger;
    std::string peer_log_format;
-      
+
 #define peer_dlog( PEER, FORMAT, ... ) \
   FC_MULTILINE_MACRO_BEGIN \
    if( logger.is_enabled( fc::log_level::debug ) ) \
@@ -299,6 +288,7 @@ namespace eosio { namespace ibc {
    if( logger.is_enabled( fc::log_level::error ) ) \
       logger.log( FC_LOG_MESSAGE( error, peer_log_format + FORMAT, __VA_ARGS__ (PEER->get_logger_variant())) ); \
   FC_MULTILINE_MACRO_END
+
 
    template<class enum_type, class=typename std::enable_if<std::is_enum<enum_type>::value>::type>
    inline enum_type& operator|=(enum_type& lhs, const enum_type& rhs)
@@ -330,10 +320,11 @@ namespace eosio { namespace ibc {
    struct handshake_initializer {
       static void populate( handshake_message& hello );
    };
-   
+
    class connection : public std::enable_shared_from_this<connection> {
    public:
       explicit connection( string endpoint );
+
       explicit connection( socket_ptr s );
       ~connection();
       void initialize();
@@ -448,23 +439,23 @@ namespace eosio { namespace ibc {
             string lport = ec ? "<unknown>" : std::to_string(lep.port());
 
             _logger_variant.emplace(fc::mutable_variant_object()
-                                       ("_name", peer_name())
-                                       ("_id", node_id)
-                                       ("_sid", ((string)node_id).substr(0, 7))
-                                       ("_ip", ip)
-                                       ("_port", port)
-                                       ("_lip", lip)
-                                       ("_lport", lport)
+               ("_name", peer_name())
+               ("_id", node_id)
+               ("_sid", ((string)node_id).substr(0, 7))
+               ("_ip", ip)
+               ("_port", port)
+               ("_lip", lip)
+               ("_lport", lport)
             );
          }
          return *_logger_variant;
       }
    };
-   
-   struct msgHandler : public fc::visitor<void> {
+
+   struct msg_handler : public fc::visitor<void> {
       ibc_plugin_impl &impl;
       connection_ptr c;
-      msgHandler( ibc_plugin_impl &imp, connection_ptr conn) : impl(imp), c(conn) {}
+      msg_handler( ibc_plugin_impl &imp, connection_ptr conn) : impl(imp), c(conn) {}
 
       template <typename T>
       void operator()(const T &msg) const
@@ -1621,7 +1612,7 @@ namespace eosio { namespace ibc {
 
    // --------------- connection ---------------
    connection::connection(string endpoint)
-      : socket(std::make_shared<tcp::socket>(my_impl->thread_pool->get_executor() )),
+      : socket(std::make_shared<tcp::socket>( my_impl->thread_pool->get_executor() )),
         node_id(),
         last_handshake_recv(),
         last_handshake_sent(),
@@ -1658,7 +1649,7 @@ namespace eosio { namespace ibc {
    void connection::initialize() {
       auto *rnd = node_id.data();
       rnd[0] = 0;
-      response_expected.reset(new boost::asio::steady_timer(my_impl->thread_pool->get_executor() ));
+      response_expected.reset(new boost::asio::steady_timer(my_impl->thread_pool->get_executor()));
    }
 
    bool connection::connected() {
@@ -1676,6 +1667,7 @@ namespace eosio { namespace ibc {
    void connection::close() {
       if(socket) {
          socket->close();
+         socket.reset( new tcp::socket( my_impl->thread_pool->get_executor() ) );
       }
       else {
          fc_wlog(logger,"no socket to close!");
@@ -1854,7 +1846,7 @@ namespace eosio { namespace ibc {
          auto ds = pending_message_buffer.create_datastream();
          ibc_message msg;
          fc::raw::unpack(ds, msg);
-         msgHandler m(impl, shared_from_this() );
+         msg_handler m(impl, shared_from_this() );
          msg.visit(m);
       } catch(  const fc::exception& e ) {
          edump((e.to_detail_string() ));
@@ -1866,7 +1858,7 @@ namespace eosio { namespace ibc {
 
 
    // --------------- ibc_plugin_impl ---------------
-   void ibc_plugin_impl::connect( connection_ptr c ) {
+   void ibc_plugin_impl::connect(const connection_ptr& c ) {
       if( c->no_retry != go_away_reason::no_reason) {
          fc_dlog( logger, "Skipping connect due to go_away reason ${r}",("r", reason_str( c->no_retry )));
          return;
@@ -1908,7 +1900,7 @@ namespace eosio { namespace ibc {
                                });
    }
 
-   void ibc_plugin_impl::connect( connection_ptr c, tcp::resolver::iterator endpoint_itr ) {
+   void ibc_plugin_impl::connect(const connection_ptr& c, tcp::resolver::iterator endpoint_itr ) {
       if( c->no_retry != go_away_reason::no_reason) {
          string rsn = reason_str(c->no_retry);
          return;
@@ -1939,7 +1931,7 @@ namespace eosio { namespace ibc {
       } );
    }
 
-   bool ibc_plugin_impl::start_session( connection_ptr con ) {
+   bool ibc_plugin_impl::start_session(const connection_ptr& con ) {
       boost::asio::ip::tcp::no_delay nodelay( true );
       boost::system::error_code ec;
       con->socket->set_option( nodelay, ec );
@@ -1958,7 +1950,7 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::start_listen_loop( ) {
-      auto socket = std::make_shared<tcp::socket>(  my_impl->thread_pool->get_executor()  );
+      auto socket = std::make_shared<tcp::socket>( my_impl->thread_pool->get_executor() );
       acceptor->async_accept( *socket, [socket,this]( boost::system::error_code ec ) {
          if( !ec ) {
             uint32_t visitors = 0;
@@ -2021,7 +2013,7 @@ namespace eosio { namespace ibc {
       });
    }
 
-   void ibc_plugin_impl::start_read_message( connection_ptr conn ) {
+   void ibc_plugin_impl::start_read_message(const connection_ptr& conn ) {
       try {
          if(!conn->socket) {
             return;
@@ -2135,7 +2127,7 @@ namespace eosio { namespace ibc {
       }
    }
 
-   void ibc_plugin_impl::close( connection_ptr c ) {
+   void ibc_plugin_impl::close(const connection_ptr& c ) {
       if( c->peer_addr.empty( ) && c->socket->is_open() ) {
          if (num_clients == 0) {
             fc_wlog( logger, "num_clients already at 0");
@@ -2154,31 +2146,6 @@ namespace eosio { namespace ibc {
             ++count;
       }
       return count;
-   }
-
-   template<typename VerifierFunc>
-   void ibc_plugin_impl::send_all( const ibc_message &msg, VerifierFunc verify) {
-      for( auto &c : connections) {
-         if( c->current() && verify( c)) {
-            c->enqueue( msg );
-         }
-      }
-   }
-
-   void ibc_plugin_impl::send_all( const ibc_message& msg ) {
-      for( auto &c : connections) {
-         if( c->current() ) {
-            c->enqueue( msg );
-         }
-      }
-   }
-
-   void ibc_plugin_impl::accepted_block_header(const block_state_ptr& block) {
-      fc_dlog(logger,"signaled, block: ${n}, id: ${id}",("n", block->block_num)("id", block->id));
-   }
-
-   void ibc_plugin_impl::accepted_block(const block_state_ptr& block) {
-      fc_dlog(logger,"signaled, block: ${n}, id: ${id}",("n", block->block_num)("id", block->id));
    }
 
    void ibc_plugin_impl::irreversible_block(const block_state_ptr& block) {
@@ -2218,7 +2185,7 @@ namespace eosio { namespace ibc {
       return valid;
    }
 
-   void ibc_plugin_impl::handle_message( connection_ptr c, const handshake_message &msg) {
+   void ibc_plugin_impl::handle_message(const connection_ptr& c, const handshake_message &msg) {
       peer_ilog(c, "received handshake_message");
       if (!is_valid(msg)) {
          peer_elog( c, "bad handshake message");
@@ -2300,7 +2267,7 @@ namespace eosio { namespace ibc {
       c->_logger_variant.reset();
    }
 
-   void ibc_plugin_impl::handle_message( connection_ptr c, const go_away_message &msg ) {
+   void ibc_plugin_impl::handle_message(const connection_ptr& c, const go_away_message &msg ) {
       string rsn = reason_str( msg.reason );
       peer_ilog(c, "received go_away_message");
       fc_ilog(logger,"received a go away message from ${p}, reason = ${r}",
@@ -2313,7 +2280,7 @@ namespace eosio { namespace ibc {
       close (c);
    }
 
-   void ibc_plugin_impl::handle_message(connection_ptr c, const time_message &msg) {
+   void ibc_plugin_impl::handle_message(const connection_ptr& c, const time_message &msg) {
       peer_ilog(c, "received time_message");
       /* We've already lost however many microseconds it took to dispatch
        * the message, but it can't be helped.
@@ -2347,7 +2314,7 @@ namespace eosio { namespace ibc {
    }
 
 
-   void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_heartbeat_message &msg ) {
+   void ibc_plugin_impl::handle_message(const connection_ptr& c, const ibc_heartbeat_message &msg ) {
       peer_dlog(c, "received ibc_heartbeat_message");
 
       fc_ilog(logger,"received msg: origtrxs_table_id_range [${of},${ot}] cashtrxs_table_seq_num_range [${cf},${ct}] new_producers_block_num ${n}, lwcls_range [${lsf},${lst}]",
@@ -2488,7 +2455,7 @@ namespace eosio { namespace ibc {
       }
    }
 
-   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_init_message &msg) {
+   void ibc_plugin_impl::handle_message(const connection_ptr& c, const lwc_init_message &msg) {
       peer_dlog(c, "received lwc_init_message");
 
       chain_contract->get_contract_state();
@@ -2551,7 +2518,7 @@ namespace eosio { namespace ibc {
       return empty;
    }
 
-   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_request_message &msg) {
+   void ibc_plugin_impl::handle_message(const connection_ptr& c, const lwc_section_request_message &msg) {
       peer_dlog(c, "received lwc_section_request_message [${from},${to}]",("from",msg.start_block_num)("to",msg.end_block_num));
 
       uint32_t rq_length = msg.end_block_num - msg.start_block_num + 1;
@@ -2607,7 +2574,7 @@ namespace eosio { namespace ibc {
       }
    }
 
-   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_section_data_message &msg) {
+   void ibc_plugin_impl::handle_message(const connection_ptr& c, const lwc_section_data_message &msg) {
       peer_dlog(c, "received lwc_section_data_message [${from},${to}]",("from",msg.headers.front().block_num())("to",msg.headers.back().block_num()));
 
       auto p = chain_contract->get_sections_tb_reverse_nth_section();
@@ -2683,7 +2650,7 @@ namespace eosio { namespace ibc {
       }
    }
 
-   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_block_commits_request_message &msg){
+   void ibc_plugin_impl::handle_message(const connection_ptr& c, const lwc_block_commits_request_message &msg){
       peer_dlog(c, "received lwc_block_commits_request_message [${num}]",("num",msg.block_num));
 
       #ifdef BOSCORE
@@ -2770,7 +2737,7 @@ namespace eosio { namespace ibc {
       #endif
    }
 
-   void ibc_plugin_impl::handle_message( connection_ptr c, const lwc_block_commits_data_message &msg){
+   void ibc_plugin_impl::handle_message(const connection_ptr& c, const lwc_block_commits_data_message &msg){
       peer_dlog(c, "received lwc_block_commits_data_message [${from},${to}]",("from",msg.headers.front().block_num())("to",msg.headers.back().block_num()));
 
       auto p = chain_contract->get_sections_tb_reverse_nth_section();
@@ -2785,7 +2752,7 @@ namespace eosio { namespace ibc {
       }
    }
 
-   void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_trxs_request_message &msg ) {
+   void ibc_plugin_impl::handle_message(const connection_ptr& c, const ibc_trxs_request_message &msg ) {
       peer_dlog(c, "received ibc_trxs_request_message, table ${tb}, id range [${f},${t}]",("tb",msg.table)("f",msg.range.first)("t",msg.range.second));
 
       uint32_t safe_tslot = my_impl->get_lib_tslot();
@@ -2833,7 +2800,7 @@ namespace eosio { namespace ibc {
       c->enqueue( ret_msg );
    }
 
-   void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_trxs_data_message &msg ) {
+   void ibc_plugin_impl::handle_message(const connection_ptr& c, const ibc_trxs_data_message &msg ) {
       peer_dlog(c, "received ibc_trxs_data_message, table ${tb}, id range [${f},${t}]", ("tb",msg.table)("f",msg.trxs_rich_info.front().table_id)("t",msg.trxs_rich_info.back().table_id));
 
       if ( msg.table == N(origtrxs) ) {
@@ -2905,7 +2872,7 @@ namespace eosio { namespace ibc {
 
    std::vector<digest_type> get_block_id_merkle_path_to_anchor_block( uint32_t from_block_num, uint32_t anchor_block_num );
 
-   void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_block_merkle_path_request_message &msg){
+   void ibc_plugin_impl::handle_message(const connection_ptr& c, const ibc_block_merkle_path_request_message &msg){
       peer_dlog(c, "received ibc_block_merkle_path_request_message, anchor_block_num [${num}]",("num",msg.anchor_block_num));
 
       ibc_block_merkle_path_data_message ret_msg;
@@ -2929,7 +2896,7 @@ namespace eosio { namespace ibc {
       c->enqueue( ret_msg );
    }
 
-   void ibc_plugin_impl::handle_message( connection_ptr c, const ibc_block_merkle_path_data_message &msg){
+   void ibc_plugin_impl::handle_message(const connection_ptr& c, const ibc_block_merkle_path_data_message &msg){
       peer_dlog(c, "received ibc_block_merkle_path_data_message, anchor_block_num [${num}]",("num",msg.anchor_block_num));
 
       uint32_t first_block_num = msg.block_merkle_paths.front().first;
@@ -4118,13 +4085,13 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_plugin_impl::start_monitors() {
-      connector_check.reset(new boost::asio::steady_timer( my_impl->thread_pool->get_executor() ));
+      connector_check.reset(new boost::asio::steady_timer( app().get_io_service() ));
       start_conn_timer(connector_period, std::weak_ptr<connection>());
 
-      ibc_heartbeat_timer.reset(new boost::asio::steady_timer( my_impl->thread_pool->get_executor() ));
+      ibc_heartbeat_timer.reset(new boost::asio::steady_timer( app().get_io_service() ));
       start_ibc_heartbeat_timer();
 
-      ibc_core_timer.reset(new boost::asio::steady_timer( my_impl->thread_pool->get_executor() ));
+      ibc_core_timer.reset(new boost::asio::steady_timer( app().get_io_service() ));
       start_ibc_core_timer();
    }
 
@@ -4436,7 +4403,7 @@ namespace eosio { namespace ibc {
       // currently thread_pool only used for server_ioc
       my->thread_pool.emplace( "ibc", my->thread_pool_size );
 
-      shared_ptr<tcp::resolver> resolver = std::make_shared<tcp::resolver>( my_impl->thread_pool->get_executor() );
+      shared_ptr<tcp::resolver> resolver = std::make_shared<tcp::resolver>(  my->thread_pool->get_executor() );
       if( my->p2p_address.size() > 0 ) {
          auto host = my->p2p_address.substr( 0, my->p2p_address.find( ':' ));
          auto port = my->p2p_address.substr( host.size() + 1, my->p2p_address.size());
@@ -4445,7 +4412,7 @@ namespace eosio { namespace ibc {
 
          my->listen_endpoint = *resolver->resolve( query );
 
-         my->acceptor.reset( new tcp::acceptor( my_impl->thread_pool->get_executor() ) );
+         my->acceptor.reset( new tcp::acceptor(  my->thread_pool->get_executor() ) );
 
          if( !my->p2p_server_address.empty() ) {
             my->p2p_address = my->p2p_server_address;
@@ -4465,7 +4432,7 @@ namespace eosio { namespace ibc {
          }
       }
 
-      my->keepalive_timer.reset( new boost::asio::steady_timer( my->thread_pool->get_executor() ) );
+      my->keepalive_timer.reset( new boost::asio::steady_timer(  my->thread_pool->get_executor() ) );
       my->ticker();
 
       if( my->acceptor ) {
