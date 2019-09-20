@@ -613,7 +613,7 @@ namespace eosio { namespace ibc {
          }
       };
 
-      my_impl->chain_plug->get_read_write_api().push_transaction( fc::variant_object( mvo(packed_transaction(trx)) ), next );
+      my_impl->chain_plug->get_read_write_api().push_transaction_v2( fc::variant_object( mvo(packed_transaction(trx)) ), next );
    }
 
    void push_recurse(int index, const std::shared_ptr<std::vector<signed_transaction>>& params, bool allow_failure ) {
@@ -634,7 +634,7 @@ namespace eosio { namespace ibc {
          }
       };
 
-      my_impl->chain_plug->get_read_write_api().push_transaction( fc::variant_object(mvo(packed_transaction( params->at(index) ))), next );
+      my_impl->chain_plug->get_read_write_api().push_transaction_v2( fc::variant_object(mvo(packed_transaction( params->at(index) ))), next );
    }
 
    void push_transactions( const std::vector<signed_transaction>& params, bool allow_failure ){
@@ -1353,7 +1353,7 @@ namespace eosio { namespace ibc {
          fc_elog(logger,"generate_signed_transaction_from_action failed");
          return;
       }
-      my_impl->chain_plug->get_read_write_api().push_transaction( fc::variant_object(mvo(packed_transaction(*trx_opt))), next );
+      my_impl->chain_plug->get_read_write_api().push_transaction_v2( fc::variant_object(mvo(packed_transaction(*trx_opt))), next );
    }
 
    void ibc_token_contract::push_cash_trxs( const std::vector<ibc_trx_rich_info>& params, uint32_t start_seq_num ){
@@ -1453,7 +1453,7 @@ namespace eosio { namespace ibc {
          fc_elog(logger,"generate_signed_transaction_from_action failed");
          return;
       }
-      my_impl->chain_plug->get_read_write_api().push_transaction( fc::variant_object(mvo(packed_transaction(*trx_opt))), next );
+      my_impl->chain_plug->get_read_write_api().push_transaction_v2( fc::variant_object(mvo(packed_transaction(*trx_opt))), next );
    }
 
    void ibc_token_contract::push_cashconfirm_trxs( const std::vector<ibc_trx_rich_info>& params, uint64_t start_seq_num ) {
@@ -1592,7 +1592,7 @@ namespace eosio { namespace ibc {
          fc_elog(logger,"generate_signed_transaction_from_action failed");
          return;
       }
-      my_impl->chain_plug->get_read_write_api().push_transaction( fc::variant_object(mvo(packed_transaction(*trx_opt))), next );
+      my_impl->chain_plug->get_read_write_api().push_transaction_v2( fc::variant_object(mvo(packed_transaction(*trx_opt))), next );
    }
 
    void ibc_token_contract::rollback( const std::vector<transaction_id_type> trxs ){

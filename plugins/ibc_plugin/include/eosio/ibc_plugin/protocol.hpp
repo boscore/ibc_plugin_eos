@@ -98,141 +98,141 @@ namespace eosio { namespace ibc {
     }
   }
 
-/**
-  * Abbreviated vocabulary description:
-  * "lwc" means eosio light weight client
-  * "ls" or "lwcls" means eosio light weight client last section in ibc.chain contract
-  */
+   /**
+     * Abbreviated vocabulary description:
+     * "lwc" means eosio light weight client
+     * "ls" or "lwcls" means eosio light weight client last section in ibc.chain contract
+     */
 
-struct lwc_section_type {
-   lwc_section_type():first_num(0),last_num(0),lib_num(0),first_id(),last_id(),lib_id(),valid(false){}
-   uint32_t       first_num;
-   uint32_t       last_num;
-   uint32_t       lib_num;
-   block_id_type  first_id;
-   block_id_type  last_id;
-   block_id_type  lib_id;
-   bool           valid;
+   struct lwc_section_type {
+      lwc_section_type():first_num(0),last_num(0),lib_num(0),first_id(),last_id(),lib_id(),valid(false){}
+      uint32_t       first_num;
+      uint32_t       last_num;
+      uint32_t       lib_num;
+      block_id_type  first_id;
+      block_id_type  last_id;
+      block_id_type  lib_id;
+      bool           valid;
 
-   bool operator == ( lwc_section_type b ){
-      return first_num == b.first_num && last_num == b.last_num && lib_num == b.lib_num
-             && first_id == b.first_id && last_id == b.last_id && lib_id == b.lib_id && valid == b.valid;
-   }
-   bool operator != ( lwc_section_type b ){
-      return !( *this == b );
-   }
-};
+      bool operator == ( lwc_section_type b ){
+         return first_num == b.first_num && last_num == b.last_num && lib_num == b.lib_num
+                && first_id == b.first_id && last_id == b.last_id && lib_id == b.lib_id && valid == b.valid;
+      }
+      bool operator != ( lwc_section_type b ){
+         return !( *this == b );
+      }
+   };
 
-/**
- * this hearbeat message should broadcast every 3 seconds and when the lwcls has any update broadcast this too.
- * when received ibc_heartbeat_message, first, get all original transactions and cashconfirm transactions according to origtrxs and cashtrxs range info.
- * then, combine with new_producers_block_num, start to get block header for the mininum block number, to let it into lib of lwc section.
- * when required blocks enter the lib, push transactions of origtrxs and cashtrxs,
- */
+   /**
+    * this hearbeat message should broadcast every 3 seconds and when the lwcls has any update broadcast this too.
+    * when received ibc_heartbeat_message, first, get all original transactions and cashconfirm transactions according to origtrxs and cashtrxs range info.
+    * then, combine with new_producers_block_num, start to get block header for the mininum block number, to let it into lib of lwc section.
+    * when required blocks enter the lib, push transactions of origtrxs and cashtrxs,
+    */
 
-typedef std::pair<uint64_t,uint64_t> range_type;
+   typedef std::pair<uint64_t,uint64_t> range_type;
 
-struct ibc_heartbeat_message {
-   ibc_heartbeat_message(): head_block_num(0),lib_block_num(0),ibc_chain_state(none),ibc_token_state(none),lwcls(),
-   origtrxs_table_id_range(),cashtrxs_table_seq_num_range(),new_producers_block_num(0){}
-   uint32_t                         head_block_num;
-   uint32_t                         lib_block_num;
+   struct ibc_heartbeat_message {
+      ibc_heartbeat_message(): head_block_num(0),lib_block_num(0),ibc_chain_state(none),ibc_token_state(none),lwcls(),
+      origtrxs_table_id_range(),cashtrxs_table_seq_num_range(),new_producers_block_num(0){}
+      uint32_t                         head_block_num;
+      uint32_t                         lib_block_num;
 
-   contract_state                   ibc_chain_state;
-   contract_state                   ibc_token_state;
-   lwc_section_type                 lwcls;   ///< lwc last section info, used under both dpos and pbft consensus eosio chains
+      contract_state                   ibc_chain_state;
+      contract_state                   ibc_token_state;
+      lwc_section_type                 lwcls;   ///< lwc last section info, used under both dpos and pbft consensus eosio chains
 
-   range_type                       origtrxs_table_id_range;
-   range_type                       cashtrxs_table_seq_num_range;
+      range_type                       origtrxs_table_id_range;
+      range_type                       cashtrxs_table_seq_num_range;
 
-   uint32_t                         new_producers_block_num; // the first new producers replacement range after lwcls's lib;
-};
+      uint32_t                         new_producers_block_num; // the first new producers replacement range after lwcls's lib;
+   };
 
-/**
- * send when last section's first blcok number is 0
- */
-struct lwc_init_message {
-   lwc_init_message():header(),active_schedule(),blockroot_merkle(){}
-   signed_block_header     header;
-   producer_schedule_type  active_schedule;
-   incremental_merkle      blockroot_merkle;
-};
+   /**
+    * send when last section's first blcok number is 0
+    */
+   struct lwc_init_message {
+      lwc_init_message():header(),active_schedule(),blockroot_merkle(){}
+      signed_block_header     header;
+      producer_schedule_type  active_schedule;
+      incremental_merkle      blockroot_merkle;
+   };
 
-struct lwc_section_request_message {
-   lwc_section_request_message():start_block_num(0),end_block_num(0){}
-   uint32_t start_block_num;
-   uint32_t end_block_num;
-};
+   struct lwc_section_request_message {
+      lwc_section_request_message():start_block_num(0),end_block_num(0){}
+      uint32_t start_block_num;
+      uint32_t end_block_num;
+   };
 
-struct lwc_section_data_message {
-   lwc_section_data_message():headers(),blockroot_merkle(){}
-   std::vector<signed_block_header>    headers;
-   incremental_merkle                  blockroot_merkle;
-};
+   struct lwc_section_data_message {
+      lwc_section_data_message():headers(),blockroot_merkle(){}
+      std::vector<signed_block_header>    headers;
+      incremental_merkle                  blockroot_merkle;
+   };
 
-struct lwc_block_commits_request_message {
-   lwc_block_commits_request_message():block_num(0){}
-   uint32_t block_num;
-};
+   struct lwc_block_commits_request_message {
+      lwc_block_commits_request_message():block_num(0){}
+      uint32_t block_num;
+   };
 
-struct lwc_block_commits_data_message {
-   lwc_block_commits_data_message():headers(),blockroot_merkle(),proof_data(),proof_type(){}
-   std::vector<signed_block_header>    headers;
-   incremental_merkle                  blockroot_merkle;
-   std::vector<char>                   proof_data;
-   name                                proof_type; // (commit)pbft_commits or (checkpoint)pbft_checkpoints
-};
+   struct lwc_block_commits_data_message {
+      lwc_block_commits_data_message():headers(),blockroot_merkle(),proof_data(),proof_type(){}
+      std::vector<signed_block_header>    headers;
+      incremental_merkle                  blockroot_merkle;
+      std::vector<char>                   proof_data;
+      name                                proof_type; // (commit)pbft_commits or (checkpoint)pbft_checkpoints
+   };
 
-struct ibc_trx_rich_info {    // used by local multi_index and ibc message
-   uint64_t                   table_id;      // same with id of origtrxs table or seq_num of cashtrxs table
-   transaction_id_type        trx_id;        // redundant, for convenience
-   std::vector<char>          packed_trx_receipt;
-   std::vector<digest_type>   trx_merkle_path;
-   uint32_t                   block_num;     // redundant, for convenience
-   std::vector<char>          block_header;
-   std::vector<digest_type>   block_id_merkle_path;
-   uint32_t                   anchor_block_num;
-};
+   struct ibc_trx_rich_info {    // used by local multi_index and ibc message
+      uint64_t                   table_id;      // same with id of origtrxs table or seq_num of cashtrxs table
+      transaction_id_type        trx_id;        // redundant, for convenience
+      std::vector<char>          packed_trx_receipt;
+      std::vector<digest_type>   trx_merkle_path;
+      uint32_t                   block_num;     // redundant, for convenience
+      std::vector<char>          block_header;
+      std::vector<digest_type>   block_id_merkle_path;
+      uint32_t                   anchor_block_num;
+   };
 
-struct ibc_trxs_request_message {
-   ibc_trxs_request_message():table(),range(){}
-   name        table;
-   range_type  range;
-};
+   struct ibc_trxs_request_message {
+      ibc_trxs_request_message():table(),range(){}
+      name        table;
+      range_type  range;
+   };
 
-struct ibc_trxs_data_message {
-   ibc_trxs_data_message():table(),trxs_rich_info(){}
-   name        table;
-   std::vector<ibc_trx_rich_info> trxs_rich_info;
-};
+   struct ibc_trxs_data_message {
+      ibc_trxs_data_message():table(),trxs_rich_info(){}
+      name        table;
+      std::vector<ibc_trx_rich_info> trxs_rich_info;
+   };
 
-struct ibc_block_merkle_path_request_message {
-   ibc_block_merkle_path_request_message():table(),block_nums(),anchor_block_num(0){}
-   name                    table;
-   std::vector<uint32_t>   block_nums;
-   uint32_t                anchor_block_num;
-};
+   struct ibc_block_merkle_path_request_message {
+      ibc_block_merkle_path_request_message():table(),block_nums(),anchor_block_num(0){}
+      name                    table;
+      std::vector<uint32_t>   block_nums;
+      uint32_t                anchor_block_num;
+   };
 
-struct ibc_block_merkle_path_data_message {
-   ibc_block_merkle_path_data_message():table(),block_merkle_paths(),anchor_block_num(0){}
-   name                    table;
-   std::vector<std::pair<uint32_t, std::vector<digest_type>>> block_merkle_paths;
-   uint32_t                anchor_block_num;
-};
+   struct ibc_block_merkle_path_data_message {
+      ibc_block_merkle_path_data_message():table(),block_merkle_paths(),anchor_block_num(0){}
+      name                    table;
+      std::vector<std::pair<uint32_t, std::vector<digest_type>>> block_merkle_paths;
+      uint32_t                anchor_block_num;
+   };
 
-using ibc_message = static_variant< handshake_message,
-                                    go_away_message,
-                                    time_message,
-                                    ibc_heartbeat_message,
-                                    lwc_init_message,
-                                    lwc_section_request_message,
-                                    lwc_section_data_message,
-                                    lwc_block_commits_request_message,
-                                    lwc_block_commits_data_message,
-                                    ibc_trxs_request_message,
-                                    ibc_trxs_data_message,
-                                    ibc_block_merkle_path_request_message,
-                                    ibc_block_merkle_path_data_message >;
+   using ibc_message = static_variant< handshake_message,
+                                       go_away_message,
+                                       time_message,
+                                       ibc_heartbeat_message,
+                                       lwc_init_message,
+                                       lwc_section_request_message,
+                                       lwc_section_data_message,
+                                       lwc_block_commits_request_message,
+                                       lwc_block_commits_data_message,
+                                       ibc_trxs_request_message,
+                                       ibc_trxs_data_message,
+                                       ibc_block_merkle_path_request_message,
+                                       ibc_block_merkle_path_data_message >;
 
    } // namespace ibc
 } // namespace eosio
