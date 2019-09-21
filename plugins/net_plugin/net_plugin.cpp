@@ -2519,6 +2519,7 @@ namespace eosio {
 
    void net_plugin_impl::handle_message(const connection_ptr& c, const packed_transaction_ptr& trx) {
       fc_dlog(logger, "got a packed transaction, cancel wait");
+      return;
       peer_ilog(c, "received packed_transaction");
       controller& cc = my_impl->chain_plug->chain();
       if( cc.get_read_mode() == eosio::db_read_mode::READ_ONLY ) {
