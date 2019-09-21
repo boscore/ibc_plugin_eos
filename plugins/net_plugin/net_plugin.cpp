@@ -767,8 +767,8 @@ namespace eosio {
    void connection::initialize() {
       auto *rnd = node_id.data();
       rnd[0] = 0;
-      response_expected.reset(new boost::asio::steady_timer( my_impl->thread_pool->get_executor() ));
-      read_delay_timer.reset(new boost::asio::steady_timer( my_impl->thread_pool->get_executor() ));
+      response_expected.reset(new boost::asio::steady_timer( app().get_io_service()  ));
+      read_delay_timer.reset(new boost::asio::steady_timer( app().get_io_service()  ));
    }
 
    bool connection::connected() {
@@ -2671,8 +2671,8 @@ namespace eosio {
    }
 
    void net_plugin_impl::start_monitors() {
-      connector_check.reset(new boost::asio::steady_timer( my_impl->thread_pool->get_executor() ));
-      transaction_check.reset(new boost::asio::steady_timer( my_impl->thread_pool->get_executor() ));
+      connector_check.reset(new boost::asio::steady_timer( app().get_io_service()  ));
+      transaction_check.reset(new boost::asio::steady_timer( app().get_io_service()  ));
       start_conn_timer(connector_period, std::weak_ptr<connection>());
       start_txn_timer();
    }
@@ -3056,7 +3056,7 @@ namespace eosio {
          }
       }
 
-      my->keepalive_timer.reset( new boost::asio::steady_timer( my->thread_pool->get_executor() ) );
+      my->keepalive_timer.reset( new boost::asio::steady_timer(  app().get_io_service() ) );
       my->ticker();
 
       if( my->acceptor ) {

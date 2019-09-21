@@ -1649,7 +1649,7 @@ namespace eosio { namespace ibc {
    void connection::initialize() {
       auto *rnd = node_id.data();
       rnd[0] = 0;
-      response_expected.reset(new boost::asio::steady_timer(my_impl->thread_pool->get_executor()));
+      response_expected.reset(new boost::asio::steady_timer( app().get_io_service() ));
    }
 
    bool connection::connected() {
@@ -4433,7 +4433,7 @@ namespace eosio { namespace ibc {
          }
       }
 
-      my->keepalive_timer.reset( new boost::asio::steady_timer(  my->thread_pool->get_executor() ) );
+      my->keepalive_timer.reset( new boost::asio::steady_timer( app().get_io_service() ) );
       my->ticker();
 
       if( my->acceptor ) {
