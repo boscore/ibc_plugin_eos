@@ -33,7 +33,7 @@ compatible combination one:
 | Repo           |    branch(es) |
 |----------------|---------------|
 | ibc_contracts  |  master       |
-| ibc_plugin_eos |  master/ibc_v2.x.x_branch |
+| ibc_plugin_eos |  master(for eosio v1.8.x)/ibc_v2.x.x_branch(for eosio 1.7.x and early version) |
 | ibc_plugin_bos |  master 2     |
 
 
