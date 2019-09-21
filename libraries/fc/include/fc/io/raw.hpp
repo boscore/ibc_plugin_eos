@@ -228,7 +228,9 @@ namespace fc {
         v |= uint32_t(uint8_t(b) & 0x7f) << by;
         by += 7;
       } while( uint8_t(b) & 0x80 );
-      vi.value= (v>>1) ^ (~(v&1)+1ull);                         //reverse zigzag encoding
+      vi.value = ((v>>1) ^ (v>>31)) + (v&0x01);
+      vi.value = v&0x01 ? vi.value : -vi.value;
+      vi.value = -vi.value;
     }
 
     template<typename Stream> inline void unpack( Stream& s, unsigned_int& vi ) {
