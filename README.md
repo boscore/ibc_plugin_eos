@@ -1,24 +1,49 @@
 
 ibc_plugin_eos
 -----
+### Build
+:large_blue_circle:**You have to modify a file in FC before compiling this repo**, modify file `libraries/fc/include/fc/io/raw.hpp`,
+in funciton `template<typename Stream> inline void unpack( Stream& s, signed_int& vi )`, 
+
+replace line ` vi.value= (v>>1) ^ (~(v&1)+1ull);` with
+```
+      vi.value = ((v>>1) ^ (v>>31)) + (v&0x01);
+      vi.value = v&0x01 ? vi.value : -vi.value;
+      vi.value = -vi.value;
+```
+then run:
+``` 
+./scripts/eosio_build.sh
+```
+
+:warning:There are a lot of updates in eosio version 1.8, and this version of ibc plugin may be unstable and easy to crash. 
+If you encounter such a situation, you need to use a monitor script to monitor the running status of the ibc plugin nodes. 
+We will continue to improve the IBC plugin to make it run more stable on eosio version 1.8.
 
 ### IBC related softwares' version description
 
 There are three IBC related softwares, [ibc_contracts](https://github.com/boscore/ibc_contracts),
 [ibc_plugin_eos](https://github.com/boscore/ibc_plugin_eos) 
 and [ibc_plugin_bos](https://github.com/boscore/ibc_plugin_bos), 
-There are currently two major versions for all these three software repositories and between major versions are incompatible, 
-so the three repositories need to use the same major version number to coordinate their work.
+There are currently multiple major versions for all these three software repositories and between major versions maybe incompatible, 
+so the three repositories need to use the correct major version number to coordinate their work.
 
-Each head of the current master branch of the three repositories is belongs the major version 2. 
-If you need the old major version 1 of these repositories, 
-please checkout the corresponding branch where the version 1 is located. As shown in the table below.
+compatible combination one:  
 
-| Repo           | master's head | version 1's branch |
-|----------------|---------------|--------------------|
-| ibc_contracts  |  version 2    | v1.x.x             |
-| ibc_plugin_eos |  version 2    | ibc_v1.x.x_branch  |
-| ibc_plugin_bos |  version 2    | ibc_v1.x.x_branch  |
+| Repo           |    branch(es) |
+|----------------|---------------|
+| ibc_contracts  |  master       |
+| ibc_plugin_eos |  master/ibc_v2.x.x_branch |
+| ibc_plugin_bos |  master 2     |
+
+
+compatible combination two:  
+
+| Repo           |    branch(es) |
+|----------------|---------------|
+| ibc_contracts  |  v1.x.x       |
+| ibc_plugin_eos |  ibc_v1.x.x_branch |
+| ibc_plugin_bos |  ibc_v1.x.x_branch |
 
 
 ### Notes
