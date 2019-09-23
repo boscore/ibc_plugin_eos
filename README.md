@@ -1,24 +1,6 @@
 
 ibc_plugin_eos
 -----
-### Build
-:large_blue_circle:**You have to modify a file in FC before compiling this repo**, modify file `libraries/fc/include/fc/io/raw.hpp`,
-in funciton `template<typename Stream> inline void unpack( Stream& s, signed_int& vi )`, 
-
-replace line ` vi.value= (v>>1) ^ (~(v&1)+1ull);` with
-```
-      vi.value = ((v>>1) ^ (v>>31)) + (v&0x01);
-      vi.value = v&0x01 ? vi.value : -vi.value;
-      vi.value = -vi.value;
-```
-then run:
-``` 
-./scripts/eosio_build.sh
-```
-
-:warning:There are a lot of updates in eosio version 1.8, and this version of ibc plugin may be unstable and easy to crash. 
-If you encounter such a situation, you need to use a monitor script to monitor the running status of the ibc plugin nodes. 
-We will continue to improve the IBC plugin to make it run more stable on eosio version 1.8.
 
 ### IBC related softwares' version description
 
@@ -34,7 +16,7 @@ compatible combination one:
 |----------------|---------------|
 | ibc_contracts  |  master       |
 | ibc_plugin_eos |  master(for eosio v1.8.x)/ibc_v2.x.x_branch(for eosio 1.7.x and early version) |
-| ibc_plugin_bos |  master 2     |
+| ibc_plugin_bos |  master       |
 
 
 compatible combination two:  
