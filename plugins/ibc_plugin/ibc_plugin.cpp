@@ -175,7 +175,7 @@ namespace eosio { namespace ibc {
       uint16_t                                  thread_pool_size = 1;
       optional<eosio::chain::named_thread_pool> thread_pool;
       void connect(const connection_ptr& c );
-      void connect(const connection_ptr& c, tcp::resolver::iterator endpoint_itr );
+      void connect(const connection_ptr& c, const std::shared_ptr<tcp::resolver>& resolver, tcp::resolver::results_type endpoints );
       bool start_session(const connection_ptr& c);
       void start_listen_loop( );
       void start_read_message(const connection_ptr& c );
@@ -329,7 +329,8 @@ namespace eosio { namespace ibc {
       ~connection();
       void initialize();
 
-      socket_ptr              socket;
+      boost::asio::io_context::strand           strand;
+      socket_ptr                                socket;
 
       fc::message_buffer<1024*1024>    pending_message_buffer;
       fc::optional<std::size_t>        outstanding_read_bytes;
@@ -1614,6 +1615,7 @@ namespace eosio { namespace ibc {
    connection::connection(string endpoint)
       : socket(std::make_shared<tcp::socket>( app().get_io_service() )),
         node_id(),
+        strand( app().get_io_service() ),
         last_handshake_recv(),
         last_handshake_sent(),
         sent_handshake_count(0),
@@ -1630,6 +1632,7 @@ namespace eosio { namespace ibc {
    connection::connection( socket_ptr s )
       : socket( s ),
         node_id(),
+        strand( app().get_io_service() ),
         last_handshake_recv(),
         last_handshake_sent(),
         sent_handshake_count(0),
@@ -1867,7 +1870,7 @@ namespace eosio { namespace ibc {
       auto colon = c->peer_addr.find(':');
 
       if (colon == std::string::npos || colon == 0) {
-         fc_elog(logger,"Invalid peer address. must be \"host:port\": ${p}", ("p",c->peer_addr));
+         fc_elog( logger, "Invalid peer address. must be \"host:port\": ${p}", ("p",c->peer_addr) );
          for ( auto itr : connections ) {
             if((*itr).peer_addr == c->peer_addr) {
                (*itr).reset();
@@ -1879,56 +1882,56 @@ namespace eosio { namespace ibc {
          return;
       }
 
-      auto host = c->peer_addr.substr( 0, colon );
-      auto port = c->peer_addr.substr( colon + 1);
-      idump((host)(port));
-      tcp::resolver::query query( tcp::v4(), host.c_str(), port.c_str() );
-      connection_wptr weak_conn = c;
-      // Note: need to add support for IPv6 too
-
-      resolver->async_resolve( query,
-                               [weak_conn, this]( const boost::system::error_code& err,
-                                                  tcp::resolver::iterator endpoint_itr ){
-                                  auto c = weak_conn.lock();
-                                  if (!c) return;
-                                  if( !err ) {
-                                     connect( c, endpoint_itr );
-                                  } else {
-                                     fc_elog(logger,"Unable to resolve ${peer_addr}: ${error}",
-                                           (  "peer_addr", c->peer_name() )("error", err.message() ) );
-                                  }
-                               });
+      shared_ptr<tcp::resolver> resolver = std::make_shared<tcp::resolver>( my_impl->thread_pool->get_executor() );
+      c->strand.post( [this, c, resolver{std::move(resolver)}](){
+         auto colon = c->peer_addr.find(':');
+         auto host = c->peer_addr.substr( 0, colon );
+         auto port = c->peer_addr.substr( colon + 1);
+         idump((host)(port));
+         // Note: need to add support for IPv6 too
+         tcp::resolver::query query( tcp::v4(), host.c_str(), port.c_str() );
+         connection_wptr weak_conn = c;
+         resolver->async_resolve( query, boost::asio::bind_executor( c->strand,
+                [weak_conn, resolver, this]( const boost::system::error_code& err, tcp::resolver::results_type endpoints ) {
+                   app().post( priority::low, [err, resolver, endpoints, weak_conn, this]() {
+                      auto c = weak_conn.lock();
+                      if( !c ) return;
+                      if( !err ) {
+                         connect( c, resolver, endpoints );
+                      } else {
+                         fc_elog( logger, "Unable to resolve ${peer_addr}: ${error}",
+                                  ("peer_addr", c->peer_name())( "error", err.message()) );
+                      }
+                   } );
+         } ) );
+      } );
    }
 
-   void ibc_plugin_impl::connect(const connection_ptr& c, tcp::resolver::iterator endpoint_itr ) {
+   void ibc_plugin_impl::connect( const connection_ptr& c, const std::shared_ptr<tcp::resolver>& resolver, tcp::resolver::results_type endpoints ) {
       if( c->no_retry != go_away_reason::no_reason) {
          string rsn = reason_str(c->no_retry);
          return;
       }
-      auto current_endpoint = *endpoint_itr;
-      ++endpoint_itr;
       c->connecting = true;
+      c->pending_message_buffer.reset();
       connection_wptr weak_conn = c;
-      c->socket->async_connect( current_endpoint, [weak_conn, endpoint_itr, this] ( const boost::system::error_code& err ) {
-         auto c = weak_conn.lock();
-         if (!c) return;
-         if( !err && c->socket->is_open() ) {
-            if (start_session( c )) {
-               c->send_handshake ();
-            }
-         } else {
-            if( endpoint_itr != tcp::resolver::iterator() ) {
-               close(c);
-               connect( c, endpoint_itr );
-            }
-            else {
-               fc_elog(logger,"connection failed to ${peer}: ${error}",
-                     ( "peer", c->peer_name())("error",err.message()));
+      boost::asio::async_connect( *c->socket, endpoints,
+         boost::asio::bind_executor( c->strand,
+            [weak_conn, resolver, socket=c->socket, this]( const boost::system::error_code& err, const tcp::endpoint& endpoint ) {
+         app().post( priority::low, [weak_conn, this, err]() {
+            auto c = weak_conn.lock();
+            if( !c ) return;
+            if( !err && c->socket->is_open()) {
+               if( start_session( c )) {
+                  c->send_handshake();
+               }
+            } else {
+               elog( "connection failed to ${peer}: ${error}", ("peer", c->peer_name())( "error", err.message()) );
                c->connecting = false;
-               my_impl->close(c);
+               my_impl->close( c );
             }
-         }
-      } );
+         } );
+      } ) );
    }
 
    bool ibc_plugin_impl::start_session(const connection_ptr& con ) {
