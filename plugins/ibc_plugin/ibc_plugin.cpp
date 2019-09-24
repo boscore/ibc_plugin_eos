@@ -172,13 +172,25 @@ namespace eosio { namespace ibc {
       shared_ptr<tcp::resolver>     resolver;
 
       bool                          use_socket_read_watermark = false;
+
       uint16_t                                  thread_pool_size = 1;
       optional<eosio::chain::named_thread_pool> thread_pool;
-      void connect(const connection_ptr& c );
-      void connect(const connection_ptr& c, const std::shared_ptr<tcp::resolver>& resolver, tcp::resolver::results_type endpoints );
+
+      void connect( const connection_ptr& c );
+      void connect( const connection_ptr& c, const std::shared_ptr<tcp::resolver>& resolver, tcp::resolver::results_type endpoints );
       bool start_session(const connection_ptr& c);
-      void start_listen_loop( );
-      void start_read_message(const connection_ptr& c );
+      void start_listen_loop();
+      void start_read_message(const connection_ptr& c);
+
+      /** \brief Process the next message from the pending message buffer
+       *
+       * Process the next message from the pending_message_buffer.
+       * message_length is the already determined length of the data
+       * part of the message that will handle the message.
+       * Returns true is successful. Returns false if an error was
+       * encountered unpacking or processing the message.
+       */
+      bool process_next_message(const connection_ptr& conn, uint32_t message_length);
 
       void   close(const connection_ptr& c );
       size_t count_open_sockets() const;
@@ -304,22 +316,98 @@ namespace eosio { namespace ibc {
     */
    constexpr auto     def_send_buffer_size_mb = 4;
    constexpr auto     def_send_buffer_size = 1024*1024*def_send_buffer_size_mb;
+   constexpr auto     def_max_write_queue_size = def_send_buffer_size*10;
+   constexpr boost::asio::chrono::milliseconds def_read_delay_for_full_write_queue{100};
    constexpr auto     def_max_clients = 10; // 0 for unlimited clients
    constexpr auto     def_max_nodes_per_host = 1;
    constexpr auto     def_conn_retry_wait = 3;
-   constexpr auto     def_txn_expire_wait = std::chrono::seconds(3);
-   constexpr auto     def_resp_expected_wait = std::chrono::seconds(5);
-   constexpr auto     def_sync_fetch_span = 100;
-   constexpr uint32_t def_max_just_send = 1500; // roughly 1 "mtu"
-   constexpr bool     large_msg_notify = false;
-
    constexpr auto     message_header_size = 4;
 
    constexpr uint16_t net_version = 1;
 
    struct handshake_initializer {
-      static void populate( handshake_message& hello );
+      static void populate(handshake_message &hello);
    };
+
+   class queued_buffer : boost::noncopyable {
+   public:
+      void clear_write_queue() {
+         _write_queue.clear();
+         _sync_write_queue.clear();
+         _write_queue_size = 0;
+      }
+
+      void clear_out_queue() {
+         while ( _out_queue.size() > 0 ) {
+            _out_queue.pop_front();
+         }
+      }
+
+      uint32_t write_queue_size() const { return _write_queue_size; }
+
+      bool is_out_queue_empty() const { return _out_queue.empty(); }
+
+      bool ready_to_send() const {
+         // if out_queue is not empty then async_write is in progress
+         return ((!_sync_write_queue.empty() || !_write_queue.empty()) && _out_queue.empty());
+      }
+
+      bool add_write_queue( const std::shared_ptr<vector<char>>& buff,
+                            std::function<void( boost::system::error_code, std::size_t )> callback,
+                            bool to_sync_queue ) {
+         if( to_sync_queue ) {
+            _sync_write_queue.push_back( {buff, callback} );
+         } else {
+            _write_queue.push_back( {buff, callback} );
+         }
+         _write_queue_size += buff->size();
+         if( _write_queue_size > 2 * def_max_write_queue_size ) {
+            return false;
+         }
+         return true;
+      }
+
+      void fill_out_buffer( std::vector<boost::asio::const_buffer>& bufs ) {
+         if( _sync_write_queue.size() > 0 ) { // always send msgs from sync_write_queue first
+            fill_out_buffer( bufs, _sync_write_queue );
+         } else { // postpone real_time write_queue if sync queue is not empty
+            fill_out_buffer( bufs, _write_queue );
+            EOS_ASSERT( _write_queue_size == 0, plugin_exception, "write queue size expected to be zero" );
+         }
+      }
+
+      void out_callback( boost::system::error_code ec, std::size_t w ) {
+         for( auto& m : _out_queue ) {
+            m.callback( ec, w );
+         }
+      }
+
+   private:
+      struct queued_write;
+      void fill_out_buffer( std::vector<boost::asio::const_buffer>& bufs,
+                            deque<queued_write>& w_queue ) {
+         while ( w_queue.size() > 0 ) {
+            auto& m = w_queue.front();
+            bufs.push_back( boost::asio::buffer( *m.buff ));
+            _write_queue_size -= m.buff->size();
+            _out_queue.emplace_back( m );
+            w_queue.pop_front();
+         }
+      }
+
+   private:
+      struct queued_write {
+         std::shared_ptr<vector<char>> buff;
+         std::function<void( boost::system::error_code, std::size_t )> callback;
+      };
+
+      uint32_t _write_queue_size = 0;
+      deque<queued_write> _write_queue;
+      deque<queued_write> _sync_write_queue; // sync_write_queue will be sent first
+      deque<queued_write> _out_queue;
+
+   }; // queued_buffer
+
 
    class connection : public std::enable_shared_from_this<connection> {
    public:
@@ -328,19 +416,16 @@ namespace eosio { namespace ibc {
       explicit connection( socket_ptr s );
       ~connection();
       void initialize();
-
+      boost::asio::io_context&                  server_ioc;
       boost::asio::io_context::strand           strand;
       socket_ptr                                socket;
 
       fc::message_buffer<1024*1024>    pending_message_buffer;
       fc::optional<std::size_t>        outstanding_read_bytes;
 
-      struct queued_write {
-         std::shared_ptr<vector<char>> buff;
-         std::function<void(boost::system::error_code, std::size_t)> callback;
-      };
-      deque<queued_write>     write_queue;
-      deque<queued_write>     out_queue;
+
+      queued_buffer           buffer_queue;
+
       fc::sha256              node_id;
       handshake_message       last_handshake_recv;
       handshake_message       last_handshake_sent;
@@ -349,7 +434,9 @@ namespace eosio { namespace ibc {
       uint16_t                protocol_version  = 0;
       string                  peer_addr;
       unique_ptr<boost::asio::steady_timer> response_expected;
-      go_away_reason          no_retry = no_reason;
+      unique_ptr<boost::asio::steady_timer> read_delay_timer;
+      go_away_reason         no_retry = no_reason;
+
 
       connection_status get_status()const {
          connection_status stat;
@@ -367,24 +454,21 @@ namespace eosio { namespace ibc {
       double                         offset{0};       //!< peer offset
 
       static const size_t            ts_buffer_size{32};
-      char                           ts[ts_buffer_size];   //!< working buffer for making human readable timestamps
+      char                           ts[ts_buffer_size];          //!< working buffer for making human readable timestamps
+      /** @} */
 
       lwc_section_type               lwcls_info;
       time_point                     lwcls_info_update_time;
 
       bool connected();
       bool current();
-      void reset(){};
+      void reset();
       void close();
       void send_handshake();
 
       /** \name Peer Timestamps
        *  Time message handling
        */
-      /** @{ */
-      /** \brief Convert an std::chrono nanosecond rep to a human readable string
-       */
-      char* convert_tstamp(const tstamp& t);
       /**  \brief Populate and queue time_message
        */
       void send_time();
@@ -407,26 +491,21 @@ namespace eosio { namespace ibc {
       const string peer_name();
 
       void enqueue( const ibc_message &msg, bool trigger_send = true );
+      void enqueue_buffer( const std::shared_ptr<std::vector<char>>& send_buffer,
+                           bool trigger_send, int priority, go_away_reason close_after_send,
+                           bool to_sync_queue = false);
+      void cancel_sync(go_away_reason);
       void flush_queues();
 
       void cancel_wait();
 
-      void queue_write(std::shared_ptr<vector<char>> buff,
+      void queue_write(const std::shared_ptr<vector<char>>& buff,
                        bool trigger_send,
-                       std::function<void(boost::system::error_code, std::size_t)> callback);
-      void do_queue_write();
+                       int priority,
+                       std::function<void(boost::system::error_code, std::size_t)> callback,
+                       bool to_sync_queue = false);
+      void do_queue_write(int priority);
 
-      /** \brief Process the next message from the pending message buffer
-       *
-       * Process the next message from the pending_message_buffer.
-       * message_length is the already determined length of the data
-       * part of the message and impl in the net plugin implementation
-       * that will handle the message.
-       * Returns true is successful. Returns false if an error was
-       * encountered unpacking or processing the message.
-       */
-      bool process_next_message(ibc_plugin_impl& impl, uint32_t message_length);
-      
       fc::optional<fc::variant_object> _logger_variant;
       const fc::variant_object& get_logger_variant()  {
          if (!_logger_variant) {
@@ -459,9 +538,9 @@ namespace eosio { namespace ibc {
       msg_handler( ibc_plugin_impl &imp, connection_ptr conn) : impl(imp), c(conn) {}
 
       template <typename T>
-      void operator()(const T &msg) const
+      void operator()( T&& msg ) const
       {
-         impl.handle_message( c, msg);
+         impl.handle_message( c, std::forward<T>(msg) );
       }
    };
 
@@ -1613,8 +1692,9 @@ namespace eosio { namespace ibc {
 
    // --------------- connection ---------------
    connection::connection(string endpoint)
-      : strand( app().get_io_service() ),
-        socket(std::make_shared<tcp::socket>( app().get_io_service() )),
+      : server_ioc( my_impl->thread_pool->get_executor() ),
+        strand( app().get_io_service() ),
+        socket( std::make_shared<tcp::socket>( my_impl->thread_pool->get_executor() ) ),
         node_id(),
         last_handshake_recv(),
         last_handshake_sent(),
@@ -1623,14 +1703,16 @@ namespace eosio { namespace ibc {
         protocol_version(0),
         peer_addr(endpoint),
         response_expected(),
+        read_delay_timer(),
         no_retry(no_reason)
    {
-      fc_wlog(logger,"created connection to ${n}", ("n", endpoint));
+      fc_ilog( logger, "created connection to ${n}", ("n", endpoint) );
       initialize();
    }
 
    connection::connection( socket_ptr s )
-      : strand( app().get_io_service() ),
+      : server_ioc( my_impl->thread_pool->get_executor() ),
+        strand( app().get_io_service() ),
         socket( s ),
         node_id(),
         last_handshake_recv(),
@@ -1640,19 +1722,20 @@ namespace eosio { namespace ibc {
         protocol_version(0),
         peer_addr(),
         response_expected(),
+        read_delay_timer(),
         no_retry(no_reason)
    {
-      fc_wlog(logger,"accepted network connection" );
+      fc_ilog( logger, "accepted network connection" );
       initialize();
    }
 
    connection::~connection() {}
 
-
    void connection::initialize() {
       auto *rnd = node_id.data();
       rnd[0] = 0;
-      response_expected.reset(new boost::asio::steady_timer( app().get_io_service() ));
+      response_expected.reset(new boost::asio::steady_timer( app().get_io_service()  ));
+      read_delay_timer.reset(new boost::asio::steady_timer( app().get_io_service()  ));
    }
 
    bool connection::connected() {
@@ -1663,45 +1746,38 @@ namespace eosio { namespace ibc {
       return connected();
    }
 
+   void connection::reset() {}
+
    void connection::flush_queues() {
-      write_queue.clear();
+      buffer_queue.clear_write_queue();
    }
 
    void connection::close() {
       if(socket) {
          socket->close();
-         socket.reset( new tcp::socket( app().get_io_service() ) );
+         socket.reset( new tcp::socket( my_impl->thread_pool->get_executor() ) );
       }
       else {
-         fc_wlog(logger,"no socket to close!");
+         fc_wlog( logger, "no socket to close!" );
       }
       flush_queues();
       connecting = false;
-
       reset();
       sent_handshake_count = 0;
+      node_id = fc::sha256();
       last_handshake_recv = handshake_message();
       last_handshake_sent = handshake_message();
       fc_dlog(logger, "canceling wait on ${p}", ("p",peer_name()));
       cancel_wait();
-      pending_message_buffer.reset();
+      if( read_delay_timer ) read_delay_timer->cancel();
    }
 
-   void connection::send_handshake( ) {
+   void connection::send_handshake() {
       handshake_initializer::populate(last_handshake_sent);
       last_handshake_sent.generation = ++sent_handshake_count;
       fc_dlog(logger, "Sending handshake generation ${g} to ${ep}",
               ("g",last_handshake_sent.generation)("ep", peer_name()));
       enqueue(last_handshake_sent);
-   }
-
-   char* connection::convert_tstamp(const tstamp& t)
-   {
-      const long long NsecPerSec{1000000000};
-      time_t seconds = t / NsecPerSec;
-      strftime(ts, ts_buffer_size, "%F %T", localtime(&seconds));
-      snprintf(ts+19, ts_buffer_size-19, ".%lld", t % NsecPerSec);
-      return ts;
    }
 
    void connection::send_time() {
@@ -1721,16 +1797,24 @@ namespace eosio { namespace ibc {
       enqueue(xpkt);
    }
 
-   void connection::queue_write(std::shared_ptr<vector<char>> buff,
+   void connection::queue_write(const std::shared_ptr<vector<char>>& buff,
                                 bool trigger_send,
-                                std::function<void(boost::system::error_code, std::size_t)> callback) {
-      write_queue.push_back({buff, callback});
-      if(out_queue.empty() && trigger_send)
-         do_queue_write();
+                                int priority,
+                                std::function<void(boost::system::error_code, std::size_t)> callback,
+                                bool to_sync_queue) {
+      if( !buffer_queue.add_write_queue( buff, callback, to_sync_queue )) {
+         fc_wlog( logger, "write_queue full ${s} bytes, giving up on connection ${p}",
+                  ("s", buffer_queue.write_queue_size())("p", peer_name()) );
+         my_impl->close( shared_from_this() );
+         return;
+      }
+      if( buffer_queue.is_out_queue_empty() && trigger_send) {
+         do_queue_write( priority );
+      }
    }
 
-   void connection::do_queue_write() {
-      if(write_queue.empty() || !out_queue.empty())
+   void connection::do_queue_write(int priority) {
+      if( !buffer_queue.ready_to_send() )
          return;
       connection_wptr c(shared_from_this());
       if(!socket->is_open()) {
@@ -1739,86 +1823,109 @@ namespace eosio { namespace ibc {
          return;
       }
       std::vector<boost::asio::const_buffer> bufs;
-      while (write_queue.size() > 0) {
-         auto& m = write_queue.front();
-         bufs.push_back(boost::asio::buffer(*m.buff));
-         out_queue.push_back(m);
-         write_queue.pop_front();
-      }
-      boost::asio::async_write(*socket, bufs, [c](boost::system::error_code ec, std::size_t w) {
-         try {
-            auto conn = c.lock();
-            if(!conn)
-               return;
+      buffer_queue.fill_out_buffer( bufs );
 
-            for (auto& m: conn->out_queue) {
-               m.callback(ec, w);
+      boost::asio::async_write(*socket, bufs,
+            boost::asio::bind_executor(strand, [c, socket=socket, priority]( boost::system::error_code ec, std::size_t w ) {
+         app().post(priority, [c, priority, ec, w]() {
+            try {
+               auto conn = c.lock();
+               if(!conn)
+                  return;
+
+               conn->buffer_queue.out_callback( ec, w );
+
+               if(ec) {
+                  string pname = conn ? conn->peer_name() : "no connection name";
+                  if( ec.value() != boost::asio::error::eof) {
+                     fc_elog( logger, "Error sending to peer ${p}: ${i}", ("p",pname)("i", ec.message()) );
+                  }
+                  else {
+                     fc_wlog( logger, "connection closure detected on write to ${p}",("p",pname) );
+                  }
+                  my_impl->close(conn);
+                  return;
+               }
+               conn->buffer_queue.clear_out_queue();
+               conn->do_queue_write( priority );
             }
-
-            if(ec) {
+            catch(const std::exception &ex) {
+               auto conn = c.lock();
                string pname = conn ? conn->peer_name() : "no connection name";
-               if( ec.value() != boost::asio::error::eof) {
-                  fc_elog(logger,"Error sending to peer ${p}: ${i}", ("p",pname)("i", ec.message()));
-               }
-               else {
-                  fc_ilog(logger,"connection closure detected on write to ${p}",("p",pname));
-               }
-               my_impl->close(conn);
-               return;
+               fc_elog( logger,"Exception in do_queue_write to ${p} ${s}", ("p",pname)("s",ex.what()) );
             }
-            while (conn->out_queue.size() > 0) {
-               conn->out_queue.pop_front();
+            catch(const fc::exception &ex) {
+               auto conn = c.lock();
+               string pname = conn ? conn->peer_name() : "no connection name";
+               fc_elog( logger,"Exception in do_queue_write to ${p} ${s}", ("p",pname)("s",ex.to_string()) );
             }
-            conn->do_queue_write();
-         }
-         catch(const std::exception &ex) {
-            auto conn = c.lock();
-            string pname = conn ? conn->peer_name() : "no connection name";
-            fc_elog(logger,"Exception in do_queue_write to ${p} ${s}", ("p",pname)("s",ex.what()));
-         }
-         catch(const fc::exception &ex) {
-            auto conn = c.lock();
-            string pname = conn ? conn->peer_name() : "no connection name";
-            fc_elog(logger,"Exception in do_queue_write to ${p} ${s}", ("p",pname)("s",ex.to_string()));
-         }
-         catch(...) {
-            auto conn = c.lock();
-            string pname = conn ? conn->peer_name() : "no connection name";
-            fc_elog(logger,"Exception in do_queue_write to ${p}", ("p",pname) );
-         }
-      });
+            catch(...) {
+               auto conn = c.lock();
+               string pname = conn ? conn->peer_name() : "no connection name";
+               fc_elog( logger,"Exception in do_queue_write to ${p}", ("p",pname) );
+            }
+         });
+      }));
    }
 
-   void connection::enqueue( const ibc_message &m, bool trigger_send ) {
+   void connection::cancel_sync(go_away_reason reason) {
+      fc_dlog(logger,"cancel sync reason = ${m}, write queue size ${o} bytes peer ${p}",
+              ("m",reason_str(reason)) ("o", buffer_queue.write_queue_size())("p", peer_name()));
+      cancel_wait();
+      flush_queues();
+      switch (reason) {
+      case validation :
+      case fatal_other : {
+         no_retry = reason;
+         enqueue( go_away_message( reason ));
+         break;
+      }
+      default:
+         fc_dlog(logger, "sending empty request but not calling sync wait on ${p}", ("p",peer_name()));
+      }
+   }
+
+   void connection::enqueue( const ibc_message& m, bool trigger_send ) {
       go_away_reason close_after_send = no_reason;
       if (m.contains<go_away_message>()) {
          close_after_send = m.get<go_away_message>().reason;
       }
 
-      uint32_t payload_size = fc::raw::pack_size( m );
-      char * header = reinterpret_cast<char*>(&payload_size);
-      size_t header_size = sizeof(payload_size);
+      const uint32_t payload_size = fc::raw::pack_size( m );
 
-      size_t buffer_size = header_size + payload_size;
+      const char* const header = reinterpret_cast<const char* const>(&payload_size); // avoid variable size encoding of uint32_t
+      constexpr size_t header_size = sizeof(payload_size);
+      static_assert( header_size == message_header_size, "invalid message_header_size" );
+      const size_t buffer_size = header_size + payload_size;
 
       auto send_buffer = std::make_shared<vector<char>>(buffer_size);
       fc::datastream<char*> ds( send_buffer->data(), buffer_size);
       ds.write( header, header_size );
       fc::raw::pack( ds, m );
+
+      enqueue_buffer( send_buffer, trigger_send, priority::low, close_after_send );
+   }
+
+   void connection::enqueue_buffer( const std::shared_ptr<std::vector<char>>& send_buffer,
+                                    bool trigger_send, int priority, go_away_reason close_after_send,
+                                    bool to_sync_queue)
+   {
       connection_wptr weak_this = shared_from_this();
-      queue_write(send_buffer,trigger_send,
+      queue_write(send_buffer,trigger_send, priority,
                   [weak_this, close_after_send](boost::system::error_code ec, std::size_t ) {
                      connection_ptr conn = weak_this.lock();
                      if (conn) {
                         if (close_after_send != no_reason) {
-                           fc_elog(logger,"sent a go away message: ${r}, closing connection to ${p}",("r", reason_str(close_after_send))("p", conn->peer_name()));
+                           fc_elog( logger, "sent a go away message: ${r}, closing connection to ${p}",
+                                    ("r", reason_str(close_after_send))("p", conn->peer_name()) );
                            my_impl->close(conn);
                            return;
                         }
                      } else {
                         fc_wlog(logger, "connection expired before enqueued ibc_message called callback!");
                      }
-                  });
+                  },
+                  to_sync_queue);
    }
 
    void connection::cancel_wait() {
@@ -1833,32 +1940,15 @@ namespace eosio { namespace ibc {
       if( !peer_addr.empty() ) {
          return peer_addr;
       }
+      if( socket != nullptr ) {
+         boost::system::error_code ec;
+         auto rep = socket->remote_endpoint(ec);
+         if( !ec ) {
+            return rep.address().to_string() + ':' + std::to_string( rep.port() );
+         }
+      }
       return "connecting client";
    }
-
-   bool connection::process_next_message(ibc_plugin_impl& impl, uint32_t message_length) {
-      try {
-         auto index = pending_message_buffer.read_index();
-         uint64_t which = 0; char b = 0; uint8_t by = 0;
-         do {
-            pending_message_buffer.peek(&b, 1, index);
-            which |= uint32_t(uint8_t(b) & 0x7f) << by;
-            by += 7;
-         } while( uint8_t(b) & 0x80 && by < 32);
-
-         auto ds = pending_message_buffer.create_datastream();
-         ibc_message msg;
-         fc::raw::unpack(ds, msg);
-         msg_handler m(impl, shared_from_this() );
-         msg.visit(m);
-      } catch(  const fc::exception& e ) {
-         edump((e.to_detail_string() ));
-         impl.close( shared_from_this() );
-         return false;
-      }
-      return true;
-   }
-
 
    // --------------- ibc_plugin_impl ---------------
    void ibc_plugin_impl::connect(const connection_ptr& c ) {
@@ -1914,6 +2004,7 @@ namespace eosio { namespace ibc {
       }
       c->connecting = true;
       c->pending_message_buffer.reset();
+      c->buffer_queue.clear_out_queue();
       connection_wptr weak_conn = c;
       boost::asio::async_connect( *c->socket, endpoints,
          boost::asio::bind_executor( c->strand,
@@ -1939,8 +2030,7 @@ namespace eosio { namespace ibc {
       boost::system::error_code ec;
       con->socket->set_option( nodelay, ec );
       if (ec) {
-         fc_elog(logger,"connection failed to ${peer}: ${error}",
-               ( "peer", con->peer_name())("error",ec.message()));
+         fc_elog( logger, "connection failed to ${peer}: ${error}", ( "peer", con->peer_name())("error",ec.message()) );
          con->connecting = false;
          close(con);
          return false;
@@ -1952,71 +2042,76 @@ namespace eosio { namespace ibc {
       }
    }
 
-   void ibc_plugin_impl::start_listen_loop( ) {
-      auto socket = std::make_shared<tcp::socket>(app().get_io_service() );
-      acceptor->async_accept( *socket, [socket,this]( boost::system::error_code ec ) {
-         if( !ec ) {
-            uint32_t visitors = 0;
-            uint32_t from_addr = 0;
-            auto paddr = socket->remote_endpoint(ec).address();
-            if (ec) {
-               fc_elog(logger,"Error getting remote endpoint: ${m}",("m", ec.message()));
-            }
-            else {
-               for (auto &conn : connections) {
-                  if(conn->socket->is_open()) {
-                     if (conn->peer_addr.empty()) {
-                        visitors++;
-                        boost::system::error_code ec;
-                        if (paddr == conn->socket->remote_endpoint(ec).address()) {
-                           from_addr++;
+
+   void ibc_plugin_impl::start_listen_loop() {
+      auto socket = std::make_shared<tcp::socket>( my_impl->thread_pool->get_executor() );
+      acceptor->async_accept( *socket, [socket, this]( boost::system::error_code ec ) {
+            app().post( priority::low, [socket, this, ec]() {
+            if( !ec ) {
+               uint32_t visitors = 0;
+               uint32_t from_addr = 0;
+               boost::system::error_code rec;
+               auto paddr = socket->remote_endpoint(rec).address();
+               if (rec) {
+                  fc_elog(logger,"Error getting remote endpoint: ${m}",("m", rec.message()));
+               }
+               else {
+                  for (auto &conn : connections) {
+                     if(conn->socket->is_open()) {
+                        if (conn->peer_addr.empty()) {
+                           visitors++;
+                           boost::system::error_code ec;
+                           if (paddr == conn->socket->remote_endpoint(ec).address()) {
+                              from_addr++;
+                           }
                         }
                      }
                   }
-               }
-               if (num_clients != visitors) {
-                  fc_ilog(logger,"checking max client, visitors = ${v} num clients ${n}",("v",visitors)("n",num_clients));
-                  num_clients = visitors;
-               }
-               if( from_addr < max_nodes_per_host && (max_client_count == 0 || num_clients < max_client_count )) {
-                  ++num_clients;
-                  connection_ptr c = std::make_shared<connection>( socket );
-                  connections.insert( c );
-                  start_session( c );
+                  if (num_clients != visitors) {
+                     fc_ilog( logger,"checking max client, visitors = ${v} num clients ${n}",("v",visitors)("n",num_clients) );
+                     num_clients = visitors;
+                  }
+                  if( from_addr < max_nodes_per_host && (max_client_count == 0 || num_clients < max_client_count )) {
+                     ++num_clients;
+                     connection_ptr c = std::make_shared<connection>( socket );
+                     connections.insert( c );
+                     start_session( c );
 
-               }
-               else {
-                  if (from_addr >= max_nodes_per_host) {
-                     fc_elog(logger, "Number of connections (${n}) from ${ra} exceeds limit",
-                             ("n", from_addr+1)("ra",paddr.to_string()));
                   }
                   else {
-                     fc_elog(logger, "Error max_client_count ${m} exceeded",
-                             ( "m", max_client_count) );
+                     if (from_addr >= max_nodes_per_host) {
+                        fc_elog(logger, "Number of connections (${n}) from ${ra} exceeds limit",
+                                ("n", from_addr+1)("ra",paddr.to_string()));
+                     }
+                     else {
+                        fc_elog(logger, "Error max_client_count ${m} exceeded",
+                                ( "m", max_client_count) );
+                     }
+                     socket->close();
                   }
-                  socket->close( );
+               }
+            } else {
+               fc_elog( logger, "Error accepting connection: ${m}",( "m", ec.message() ) );
+               // For the listed error codes below, recall start_listen_loop()
+               switch (ec.value()) {
+                  case ECONNABORTED:
+                  case EMFILE:
+                  case ENFILE:
+                  case ENOBUFS:
+                  case ENOMEM:
+                  case EPROTO:
+                     break;
+                  default:
+                     return;
                }
             }
-         } else {
-            fc_elog(logger,"Error accepting connection: ${m}",( "m", ec.message() ) );
-            // For the listed error codes below, recall start_listen_loop()
-            switch (ec.value()) {
-               case ECONNABORTED:
-               case EMFILE:
-               case ENFILE:
-               case ENOBUFS:
-               case ENOMEM:
-               case EPROTO:
-                  break;
-               default:
-                  return;
-            }
-         }
-         start_listen_loop();
+            start_listen_loop();
+         });
       });
    }
 
-   void ibc_plugin_impl::start_read_message(const connection_ptr& conn ) {
+   void ibc_plugin_impl::start_read_message(const connection_ptr& conn) {
+
       try {
          if(!conn->socket) {
             return;
@@ -2040,106 +2135,142 @@ namespace eosio { namespace ibc {
             }
          };
 
+         if( conn->buffer_queue.write_queue_size() > def_max_write_queue_size )
+         {
+            // too much queued up, reschedule
+            if( conn->buffer_queue.write_queue_size() > def_max_write_queue_size ) {
+               peer_wlog( conn, "write_queue full ${s} bytes", ("s", conn->buffer_queue.write_queue_size()) );
+            }
+            if( conn->buffer_queue.write_queue_size() > 2*def_max_write_queue_size )
+            {
+               fc_elog( logger, "queues over full, giving up on connection ${p}", ("p", conn->peer_name()) );
+               fc_elog( logger, "  write_queue ${s} bytes", ("s", conn->buffer_queue.write_queue_size()) );
+               my_impl->close( conn );
+               return;
+            }
+            if( !conn->read_delay_timer ) return;
+            conn->read_delay_timer->expires_from_now( def_read_delay_for_full_write_queue );
+            conn->read_delay_timer->async_wait( [this, weak_conn]( boost::system::error_code ec ) {
+               app().post( priority::low, [this, weak_conn, ec]() {
+                  auto conn = weak_conn.lock();
+                  if( !conn ) return;
+                  if( !ec ) {
+                     start_read_message( conn );
+                  } else {
+                     fc_elog( logger, "Read delay timer error: ${e}, closing connection: ${p}",
+                              ("e", ec.message())("p",conn->peer_name()) );
+                     close( conn );
+                  }
+               } );
+            } );
+            return;
+         }
+
          boost::asio::async_read(*conn->socket,
-                                 conn->pending_message_buffer.get_buffer_sequence_for_boost_async_read(), completion_handler,
-                                 [this,weak_conn]( boost::system::error_code ec, std::size_t bytes_transferred ) {
-                                    auto conn = weak_conn.lock();
-                                    if (!conn) {
-                                       return;
-                                    }
+            conn->pending_message_buffer.get_buffer_sequence_for_boost_async_read(), completion_handler,
+            boost::asio::bind_executor( conn->strand,
+              [this,weak_conn,socket=conn->socket]( boost::system::error_code ec, std::size_t bytes_transferred ) {
+            app().post( priority::medium, [this,weak_conn, socket, ec, bytes_transferred]() {
+               auto conn = weak_conn.lock();
+               if (!conn || !conn->socket || !conn->socket->is_open() || !socket->is_open()) {
+                  return;
+               }
 
-                                    conn->outstanding_read_bytes.reset();
+               conn->outstanding_read_bytes.reset();
 
-                                    try {
-                                       if( !ec ) {
-                                          if (bytes_transferred > conn->pending_message_buffer.bytes_to_write()) {
-                                             fc_elog(logger,"async_read_some callback: bytes_transfered = ${bt}, buffer.bytes_to_write = ${btw}",
-                                                  ("bt",bytes_transferred)("btw",conn->pending_message_buffer.bytes_to_write()));
-                                          }
-                                          EOS_ASSERT(bytes_transferred <= conn->pending_message_buffer.bytes_to_write(), plugin_exception, "");
-                                          conn->pending_message_buffer.advance_write_ptr(bytes_transferred);
-                                          while (conn->pending_message_buffer.bytes_to_read() > 0) {
-                                             uint32_t bytes_in_buffer = conn->pending_message_buffer.bytes_to_read();
+               try {
+                  if( !ec ) {
+                     if (bytes_transferred > conn->pending_message_buffer.bytes_to_write()) {
+                        fc_elog( logger,"async_read_some callback: bytes_transfered = ${bt}, buffer.bytes_to_write = ${btw}",
+                                 ("bt",bytes_transferred)("btw",conn->pending_message_buffer.bytes_to_write()) );
+                     }
+                     EOS_ASSERT(bytes_transferred <= conn->pending_message_buffer.bytes_to_write(), plugin_exception, "");
+                     conn->pending_message_buffer.advance_write_ptr(bytes_transferred);
+                     while (conn->pending_message_buffer.bytes_to_read() > 0) {
+                        uint32_t bytes_in_buffer = conn->pending_message_buffer.bytes_to_read();
 
-                                             if (bytes_in_buffer < message_header_size) {
-                                                conn->outstanding_read_bytes.emplace(message_header_size - bytes_in_buffer);
-                                                break;
-                                             } else {
-                                                uint32_t message_length;
-                                                auto index = conn->pending_message_buffer.read_index();
-                                                conn->pending_message_buffer.peek(&message_length, sizeof(message_length), index);
-                                                if(message_length > def_send_buffer_size*2 || message_length == 0) {
-                                                   boost::system::error_code ec;
-                                                   fc_elog(logger,"incoming message length unexpected (${i}), from ${p}", ("i", message_length)("p",boost::lexical_cast<std::string>(conn->socket->remote_endpoint(ec))));
-                                                   close(conn);
-                                                   return;
-                                                }
+                        if (bytes_in_buffer < message_header_size) {
+                           conn->outstanding_read_bytes.emplace(message_header_size - bytes_in_buffer);
+                           break;
+                        } else {
+                           uint32_t message_length;
+                           auto index = conn->pending_message_buffer.read_index();
+                           conn->pending_message_buffer.peek(&message_length, sizeof(message_length), index);
+                           if(message_length > def_send_buffer_size*2 || message_length == 0) {
+                              boost::system::error_code ec;
+                              fc_elog( logger,"incoming message length unexpected (${i}), from ${p}",
+                                       ("i", message_length)("p",boost::lexical_cast<std::string>(conn->socket->remote_endpoint(ec))) );
+                              close(conn);
+                              return;
+                           }
 
-                                                auto total_message_bytes = message_length + message_header_size;
+                           auto total_message_bytes = message_length + message_header_size;
 
-                                                if (bytes_in_buffer >= total_message_bytes) {
-                                                   conn->pending_message_buffer.advance_read_ptr(message_header_size);
-                                                   if (!conn->process_next_message(*this, message_length)) {
-                                                      return;
-                                                   }
-                                                } else {
-                                                   auto outstanding_message_bytes = total_message_bytes - bytes_in_buffer;
-                                                   auto available_buffer_bytes = conn->pending_message_buffer.bytes_to_write();
-                                                   if (outstanding_message_bytes > available_buffer_bytes) {
-                                                      conn->pending_message_buffer.add_space( outstanding_message_bytes - available_buffer_bytes );
-                                                   }
+                           if (bytes_in_buffer >= total_message_bytes) {
+                              conn->pending_message_buffer.advance_read_ptr(message_header_size);
+                              if (!process_next_message(conn, message_length)) {
+                                 return;
+                              }
+                           } else {
+                              auto outstanding_message_bytes = total_message_bytes - bytes_in_buffer;
+                              auto available_buffer_bytes = conn->pending_message_buffer.bytes_to_write();
+                              if (outstanding_message_bytes > available_buffer_bytes) {
+                                 conn->pending_message_buffer.add_space( outstanding_message_bytes - available_buffer_bytes );
+                              }
 
-                                                   conn->outstanding_read_bytes.emplace(outstanding_message_bytes);
-                                                   break;
-                                                }
-                                             }
-                                          }
-                                          start_read_message(conn);
-                                       } else {
-                                          auto pname = conn->peer_name();
-                                          if (ec.value() != boost::asio::error::eof) {
-                                             fc_elog(logger,"Error reading message from ${p}: ${m}",("p",pname)( "m", ec.message() ) );
-                                          } else {
-                                             fc_ilog(logger,"Peer ${p} closed connection",("p",pname) );
-                                          }
-                                          /* close( conn ); */
-                                          conn->write_queue.clear();
-                                          conn->out_queue.clear();
-                                       }
-                                    }
-                                    catch(const std::exception &ex) {
-                                       string pname = conn ? conn->peer_name() : "no connection name";
-                                       fc_elog(logger,"Exception in handling read data from ${p} ${s}",("p",pname)("s",ex.what()));
-                                       close( conn );
-                                    }
-                                    catch(const fc::exception &ex) {
-                                       string pname = conn ? conn->peer_name() : "no connection name";
-                                       fc_elog(logger,"Exception in handling read data ${s}", ("p",pname)("s",ex.to_string()));
-                                       close( conn );
-                                    }
-                                    catch (...) {
-                                       string pname = conn ? conn->peer_name() : "no connection name";
-                                       fc_elog(logger,"Undefined exception hanlding the read data from connection ${p}",( "p",pname));
-                                       close( conn );
-                                    }
-                                 } );
+                              conn->outstanding_read_bytes.emplace(outstanding_message_bytes);
+                              break;
+                           }
+                        }
+                     }
+                     start_read_message(conn);
+                  } else {
+                     auto pname = conn->peer_name();
+                     if (ec.value() != boost::asio::error::eof) {
+                        fc_elog( logger, "Error reading message from ${p}: ${m}",("p",pname)( "m", ec.message() ) );
+                     } else {
+                        fc_ilog( logger, "Peer ${p} closed connection",("p",pname) );
+                     }
+                     close( conn );
+                  }
+               }
+               catch(const std::exception &ex) {
+                  fc_elog( logger, "Exception in handling read data from ${p}: ${s}",
+                           ("p",conn->peer_name())("s",ex.what()) );
+                  close( conn );
+               }
+               catch(const fc::exception &ex) {
+                  fc_elog( logger, "Exception in handling read data from ${p}: ${s}",
+                           ("p",conn->peer_name())("s",ex.to_string()) );
+                  close( conn );
+               }
+               catch (...) {
+                  fc_elog( logger, "Undefined exception handling the read data from ${p}",( "p",conn->peer_name()) );
+                  close( conn );
+               }
+            });
+         }));
       } catch (...) {
          string pname = conn ? conn->peer_name() : "no connection name";
-         fc_elog(logger,"Undefined exception handling reading ${p}",("p",pname) );
+         fc_elog( logger, "Undefined exception handling reading ${p}",("p",pname) );
          close( conn );
       }
    }
 
-   void ibc_plugin_impl::close(const connection_ptr& c ) {
-      if( c->peer_addr.empty( ) && c->socket->is_open() ) {
-         if (num_clients == 0) {
-            fc_wlog( logger, "num_clients already at 0");
-         }
-         else {
-            --num_clients;
-         }
+   bool ibc_plugin_impl::process_next_message(const connection_ptr& conn, uint32_t message_length) {
+      try {
+         auto ds = conn->pending_message_buffer.create_datastream();
+         ibc_message msg;
+         fc::raw::unpack( ds, msg );
+         msg_handler m( *this, conn );
+         msg.visit( m );
+      } catch( const fc::exception& e ) {
+         fc_elog( logger, "Exception in handling message from ${p}: ${s}",
+                  ("p", conn->peer_name())("s", e.to_detail_string()) );
+         close( conn );
+         return false;
       }
-      c->close();
+      return true;
    }
 
    size_t ibc_plugin_impl::count_open_sockets() const {
@@ -2169,26 +2300,26 @@ namespace eosio { namespace ibc {
       // affecting state.
       bool valid = true;
       if (msg.last_irreversible_block_num > msg.head_num) {
-         fc_wlog(logger,"Handshake message validation: last irreversible block (${i}) is greater than head block (${h})",
-              ("i", msg.last_irreversible_block_num)("h", msg.head_num));
+         fc_wlog( logger, "Handshake message validation: last irreversible block (${i}) is greater than head block (${h})",
+                  ("i", msg.last_irreversible_block_num)("h", msg.head_num) );
          valid = false;
       }
       if (msg.p2p_address.empty()) {
-         fc_wlog(logger,"Handshake message validation: p2p_address is null string");
+         fc_wlog( logger, "Handshake message validation: p2p_address is null string" );
          valid = false;
       }
       if (msg.os.empty()) {
-         fc_wlog(logger,"Handshake message validation: os field is null string");
+         fc_wlog( logger, "Handshake message validation: os field is null string" );
          valid = false;
       }
       if ((msg.sig != chain::signature_type() || msg.token != sha256()) && (msg.token != fc::sha256::hash(msg.time))) {
-         fc_wlog(logger,"Handshake message validation: token field invalid");
+         fc_wlog( logger, "Handshake message validation: token field invalid" );
          valid = false;
       }
       return valid;
    }
 
-   void ibc_plugin_impl::handle_message(const connection_ptr& c, const handshake_message &msg) {
+   void ibc_plugin_impl::handle_message(const connection_ptr& c, const handshake_message& msg) {
       peer_ilog(c, "received handshake_message");
       if (!is_valid(msg)) {
          peer_elog( c, "bad handshake message");
@@ -2201,7 +2332,7 @@ namespace eosio { namespace ibc {
       }
       if (msg.generation == 1) {
          if( msg.node_id == node_id) {
-            fc_elog(logger,"Self connection detected. Closing connection");
+            fc_elog( logger, "Self connection detected. Closing connection" );
             c->enqueue( go_away_message( self ) );
             return;
          }
@@ -2237,17 +2368,16 @@ namespace eosio { namespace ibc {
          //   c->enqueue( go_away_message(go_away_reason::wrong_chain) );
          //   return;
          //}
-
          c->protocol_version = msg.network_version;
          if(c->protocol_version != net_version) {
             if (network_version_match) {
-               fc_elog(logger,"Peer network version does not match expected ${nv} but got ${mnv}",
-                    ("nv", net_version)("mnv", c->protocol_version));
+               fc_elog( logger, "Peer network version does not match expected ${nv} but got ${mnv}",
+                        ("nv", net_version)("mnv", c->protocol_version) );
                c->enqueue(go_away_message(wrong_version));
                return;
             } else {
-               fc_ilog(logger,"Local network version: ${nv} Remote version: ${mnv}",
-                    ("nv", net_version)("mnv", c->protocol_version));
+               fc_ilog( logger, "Local network version: ${nv} Remote version: ${mnv}",
+                        ("nv", net_version)("mnv", c->protocol_version));
             }
          }
 
@@ -2256,7 +2386,7 @@ namespace eosio { namespace ibc {
          }
 
          if(!authenticate_peer(msg)) {
-            fc_elog(logger,"Peer not authenticated.  Closing connection.");
+            fc_elog( logger, "Peer not authenticated.  Closing connection." );
             c->enqueue(go_away_message(authentication));
             return;
          }
@@ -2270,20 +2400,17 @@ namespace eosio { namespace ibc {
       c->_logger_variant.reset();
    }
 
-   void ibc_plugin_impl::handle_message(const connection_ptr& c, const go_away_message &msg ) {
-      string rsn = reason_str( msg.reason );
-      peer_ilog(c, "received go_away_message");
-      fc_ilog(logger,"received a go away message from ${p}, reason = ${r}",
-            ("p", c->peer_name())("r",rsn));
+   void ibc_plugin_impl::handle_message(const connection_ptr& c, const go_away_message& msg) {
+      peer_wlog(c, "received go_away_message, reason = ${r}", ("r",reason_str( msg.reason )) );
       c->no_retry = msg.reason;
       if(msg.reason == duplicate ) {
          c->node_id = msg.node_id;
       }
       c->flush_queues();
-      close (c);
+      close(c);
    }
 
-   void ibc_plugin_impl::handle_message(const connection_ptr& c, const time_message &msg) {
+   void ibc_plugin_impl::handle_message(const connection_ptr& c, const time_message& msg) {
       peer_ilog(c, "received time_message");
       /* We've already lost however many microseconds it took to dispatch
        * the message, but it can't be helped.
@@ -2302,10 +2429,10 @@ namespace eosio { namespace ibc {
       c->dst = msg.dst;
 
       if(msg.org == 0)
-      {
-         c->send_time(msg);
-         return;  // We don't have enough data to perform the calculation yet.
-      }
+         {
+            c->send_time(msg);
+            return;  // We don't have enough data to perform the calculation yet.
+         }
 
       c->offset = (double(c->rec - c->org) + double(msg.xmt - c->dst)) / 2;
       double NsecPerUsec{1000};
@@ -4073,6 +4200,18 @@ namespace eosio { namespace ibc {
          ++it;
       }
       start_conn_timer(connector_period, std::weak_ptr<connection>());
+   }
+
+   void ibc_plugin_impl::close(const connection_ptr& c) {
+      if( c->peer_addr.empty() && c->socket->is_open() ) {
+         if (num_clients == 0) {
+            fc_wlog( logger, "num_clients already at 0");
+         }
+         else {
+            --num_clients;
+         }
+      }
+      c->close();
    }
 
    void ibc_plugin_impl::start_conn_timer(boost::asio::steady_timer::duration du, std::weak_ptr<connection> from_connection) {
