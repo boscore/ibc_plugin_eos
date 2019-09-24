@@ -4546,7 +4546,7 @@ namespace eosio { namespace ibc {
       // currently thread_pool only used for server_ioc
       my->thread_pool.emplace( "ibc", my->thread_pool_size );
 
-      shared_ptr<tcp::resolver> resolver = std::make_shared<tcp::resolver>(  app().get_io_service() );
+      shared_ptr<tcp::resolver> resolver = std::make_shared<tcp::resolver>(  my_impl->thread_pool->get_executor() );
       if( my->p2p_address.size() > 0 ) {
          auto host = my->p2p_address.substr( 0, my->p2p_address.find( ':' ));
          auto port = my->p2p_address.substr( host.size() + 1, my->p2p_address.size());
@@ -4555,7 +4555,7 @@ namespace eosio { namespace ibc {
 
          my->listen_endpoint = *resolver->resolve( query );
 
-         my->acceptor.reset( new tcp::acceptor(  app().get_io_service() ) );
+         my->acceptor.reset( new tcp::acceptor(  my_impl->thread_pool->get_executor() ) );
 
          if( !my->p2p_server_address.empty() ) {
             my->p2p_address = my->p2p_server_address;
