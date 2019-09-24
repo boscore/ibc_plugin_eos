@@ -1692,9 +1692,9 @@ namespace eosio { namespace ibc {
 
    // --------------- connection ---------------
    connection::connection(string endpoint)
-      : server_ioc( my_impl->thread_pool->get_executor() ),
+      : server_ioc( app().get_io_service() ),
         strand( app().get_io_service() ),
-        socket( std::make_shared<tcp::socket>( my_impl->thread_pool->get_executor() ) ),
+        socket( std::make_shared<tcp::socket>( app().get_io_service() ) ),
         node_id(),
         last_handshake_recv(),
         last_handshake_sent(),
@@ -1711,7 +1711,7 @@ namespace eosio { namespace ibc {
    }
 
    connection::connection( socket_ptr s )
-      : server_ioc( my_impl->thread_pool->get_executor() ),
+      : server_ioc( app().get_io_service() ),
         strand( app().get_io_service() ),
         socket( s ),
         node_id(),
@@ -1755,7 +1755,7 @@ namespace eosio { namespace ibc {
    void connection::close() {
       if(socket) {
          socket->close();
-         socket.reset( new tcp::socket( my_impl->thread_pool->get_executor() ) );
+         socket.reset( new tcp::socket( app().get_io_service() ) );
       }
       else {
          fc_wlog( logger, "no socket to close!" );
@@ -1972,7 +1972,7 @@ namespace eosio { namespace ibc {
          return;
       }
 
-      shared_ptr<tcp::resolver> resolver = std::make_shared<tcp::resolver>( my_impl->thread_pool->get_executor() );
+      shared_ptr<tcp::resolver> resolver = std::make_shared<tcp::resolver>( app().get_io_service() );
       c->strand.post( [this, c, resolver{std::move(resolver)}](){
          auto colon = c->peer_addr.find(':');
          auto host = c->peer_addr.substr( 0, colon );
@@ -2044,7 +2044,7 @@ namespace eosio { namespace ibc {
 
 
    void ibc_plugin_impl::start_listen_loop() {
-      auto socket = std::make_shared<tcp::socket>( my_impl->thread_pool->get_executor() );
+      auto socket = std::make_shared<tcp::socket>( app().get_io_service() );
       acceptor->async_accept( *socket, [socket, this]( boost::system::error_code ec ) {
             app().post( priority::low, [socket, this, ec]() {
             if( !ec ) {
@@ -4546,7 +4546,7 @@ namespace eosio { namespace ibc {
       // currently thread_pool only used for server_ioc
       my->thread_pool.emplace( "ibc", my->thread_pool_size );
 
-      shared_ptr<tcp::resolver> resolver = std::make_shared<tcp::resolver>(  my_impl->thread_pool->get_executor() );
+      shared_ptr<tcp::resolver> resolver = std::make_shared<tcp::resolver>(  app().get_io_service() );
       if( my->p2p_address.size() > 0 ) {
          auto host = my->p2p_address.substr( 0, my->p2p_address.find( ':' ));
          auto port = my->p2p_address.substr( host.size() + 1, my->p2p_address.size());
@@ -4555,7 +4555,7 @@ namespace eosio { namespace ibc {
 
          my->listen_endpoint = *resolver->resolve( query );
 
-         my->acceptor.reset( new tcp::acceptor(  my_impl->thread_pool->get_executor() ) );
+         my->acceptor.reset( new tcp::acceptor(  app().get_io_service() ) );
 
          if( !my->p2p_server_address.empty() ) {
             my->p2p_address = my->p2p_server_address;
