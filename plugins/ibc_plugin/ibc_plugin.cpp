@@ -2454,7 +2454,7 @@ namespace eosio { namespace ibc {
            ("cf",msg.cashtrxs_table_seq_num_range.first)("ct",msg.cashtrxs_table_seq_num_range.second)
            ("n",msg.new_producers_block_num)("lsf",msg.lwcls.first_num)("lst",msg.lwcls.last_num));
 
-      if ( ! head_catched_up ) { fc_ilog(logger,"head does not catchup"); return; }
+      if ( ! head_catched_up ) { fc_ilog(logger,"head not catch up"); return; }
 
       // step one: check ibc_chain_state and lwcls
       if ( msg.ibc_chain_state == deployed ) {  // send lwc_init_message
@@ -2592,7 +2592,7 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message(const connection_ptr& c, const lwc_init_message &msg) {
       peer_dlog(c, "received lwc_init_message");
 
-      if ( ! head_catched_up ) { fc_ilog(logger,"head does not catchup"); return; }
+      if ( ! head_catched_up ) { fc_ilog(logger,"head not catch up"); return; }
 
       chain_contract->get_contract_state();
       if ( chain_contract->state == deployed && chain_contract->lwc_config_valid() ){
@@ -2657,7 +2657,7 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message(const connection_ptr& c, const lwc_section_request_message &msg) {
       peer_dlog(c, "received lwc_section_request_message [${from},${to}]",("from",msg.start_block_num)("to",msg.end_block_num));
 
-      if ( ! head_catched_up ) { fc_ilog(logger,"head does not catchup"); return; }
+      if ( ! head_catched_up ) { fc_ilog(logger,"head not catch up"); return; }
 
       uint32_t rq_length = msg.end_block_num - msg.start_block_num + 1;
       uint32_t lib_block_num = chain_plug->chain().last_irreversible_block_num();
@@ -2715,7 +2715,7 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message(const connection_ptr& c, const lwc_section_data_message &msg) {
       peer_dlog(c, "received lwc_section_data_message [${from},${to}]",("from",msg.headers.front().block_num())("to",msg.headers.back().block_num()));
 
-      if ( ! head_catched_up ) { fc_ilog(logger,"head does not catchup"); return; }
+      if ( ! head_catched_up ) { fc_ilog(logger,"head not catch up"); return; }
 
       auto p = chain_contract->get_sections_tb_reverse_nth_section();
       if ( !p.valid() ){
@@ -2793,7 +2793,7 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message(const connection_ptr& c, const lwc_block_commits_request_message &msg){
       peer_dlog(c, "received lwc_block_commits_request_message [${num}]",("num",msg.block_num));
 
-      if ( ! head_catched_up ) { fc_ilog(logger,"head does not catchup"); return; }
+      if ( ! head_catched_up ) { fc_ilog(logger,"head not catch up"); return; }
 
       #ifdef BOSCORE
       uint32_t lib_block_num = chain_plug->chain().last_irreversible_block_num();
@@ -2882,7 +2882,7 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message(const connection_ptr& c, const lwc_block_commits_data_message &msg){
       peer_dlog(c, "received lwc_block_commits_data_message [${from},${to}]",("from",msg.headers.front().block_num())("to",msg.headers.back().block_num()));
 
-      if ( ! head_catched_up ) { fc_ilog(logger,"head does not catchup"); return; }
+      if ( ! head_catched_up ) { fc_ilog(logger,"head not catch up"); return; }
 
       auto p = chain_contract->get_sections_tb_reverse_nth_section();
       if ( !p.valid() ){
@@ -2899,7 +2899,7 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message(const connection_ptr& c, const ibc_trxs_request_message &msg ) {
       peer_dlog(c, "received ibc_trxs_request_message, table ${tb}, id range [${f},${t}]",("tb",msg.table)("f",msg.range.first)("t",msg.range.second));
 
-      if ( ! head_catched_up ) { fc_ilog(logger,"head does not catchup"); return; }
+      if ( ! head_catched_up ) { fc_ilog(logger,"head not catch up"); return; }
 
       uint32_t safe_tslot = my_impl->get_lib_tslot();
       ibc_trxs_data_message ret_msg;
@@ -2949,7 +2949,7 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message(const connection_ptr& c, const ibc_trxs_data_message &msg ) {
       peer_dlog(c, "received ibc_trxs_data_message, table ${tb}, id range [${f},${t}]", ("tb",msg.table)("f",msg.trxs_rich_info.front().table_id)("t",msg.trxs_rich_info.back().table_id));
 
-      if ( ! head_catched_up ) { fc_ilog(logger,"head does not catchup"); return; }
+      if ( ! head_catched_up ) { fc_ilog(logger,"head not catch up"); return; }
 
       if ( msg.table == N(origtrxs) ) {
          for( const auto& trx_info : msg.trxs_rich_info ){
@@ -3023,7 +3023,7 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message(const connection_ptr& c, const ibc_block_merkle_path_request_message &msg){
       peer_dlog(c, "received ibc_block_merkle_path_request_message, anchor_block_num [${num}]",("num",msg.anchor_block_num));
 
-      if ( ! head_catched_up ) { fc_ilog(logger,"head does not catchup"); return; }
+      if ( ! head_catched_up ) { fc_ilog(logger,"head not catch up"); return; }
 
       ibc_block_merkle_path_data_message ret_msg;
       ret_msg.table = msg.table;
@@ -3049,7 +3049,7 @@ namespace eosio { namespace ibc {
    void ibc_plugin_impl::handle_message(const connection_ptr& c, const ibc_block_merkle_path_data_message &msg){
       peer_dlog(c, "received ibc_block_merkle_path_data_message, anchor_block_num [${num}]",("num",msg.anchor_block_num));
 
-      if ( ! head_catched_up ) { fc_ilog(logger,"head does not catchup"); return; }
+      if ( ! head_catched_up ) { fc_ilog(logger,"head not catch up"); return; }
 
       uint32_t first_block_num = msg.block_merkle_paths.front().first;
       
@@ -3768,6 +3768,8 @@ namespace eosio { namespace ibc {
     */
 
    void ibc_plugin_impl::ibc_core_checker( ){
+
+      if ( ! head_catched_up ) { fc_ilog(logger,"head not catch up"); return; }
 
       if ( chain_contract->state != working || token_contract->state != working ){
          chain_contract->get_contract_state();
