@@ -1,6 +1,5 @@
-
 ibc_plugin_eos
------
+-------------
 
 ### IBC related softwares' version description
 
