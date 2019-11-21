@@ -964,7 +964,8 @@ namespace eosio { namespace ibc {
       auto actn = get_action( account, N(chaininit), vector<permission_level>{{ my_impl->relay, config::active_name}}, mvo()
             ("header",            fc::raw::pack(msg.header))
             ("active_schedule",   msg.active_schedule)
-            ("blockroot_merkle",  msg.blockroot_merkle));
+            ("blockroot_merkle",  msg.blockroot_merkle)
+            ("relay",             my_impl->relay));
 
       if ( ! actn.valid() ){
          fc_elog(logger,"chain_init: get action failed");
@@ -976,7 +977,8 @@ namespace eosio { namespace ibc {
    void ibc_chain_contract::pushsection( const lwc_section_data_message& msg ){
       auto actn = get_action( account, N(pushsection), vector<permission_level>{{ my_impl->relay, config::active_name}}, mvo()
             ("headers",           fc::raw::pack(msg.headers))
-            ("blockroot_merkle",  msg.blockroot_merkle));
+            ("blockroot_merkle",  msg.blockroot_merkle)
+            ("relay",             my_impl->relay));
 
       if ( ! actn.valid() ){
          fc_elog(logger,"newsection: get action failed");
@@ -990,7 +992,8 @@ namespace eosio { namespace ibc {
          ("headers",           fc::raw::pack(msg.headers))
          ("blockroot_merkle",  msg.blockroot_merkle)
          ("proof_data",        msg.proof_data)
-         ("proof_type",        msg.proof_type));
+         ("proof_type",        msg.proof_type)
+         ("relay",             my_impl->relay));
 
       if ( ! actn.valid() ){
          fc_elog(logger,"newsection: get action failed");
@@ -1000,7 +1003,8 @@ namespace eosio { namespace ibc {
    }
 
    void ibc_chain_contract::rmfirstsctn(){
-      auto actn = get_action( account, N(rmfirstsctn), vector<permission_level>{{ my_impl->relay, config::active_name}}, mvo());
+      auto actn = get_action( account, N(rmfirstsctn), vector<permission_level>{{ my_impl->relay, config::active_name}}, mvo()
+            ("relay",             my_impl->relay));
 
       if ( ! actn.valid() ){
          fc_elog(logger,"newsection: get action failed");
@@ -1414,7 +1418,8 @@ namespace eosio { namespace ibc {
                ("anchor_block_num",             par.anchor_block_num)
                ("to",                           par.to)
                ("quantity",                     par.quantity)
-               ("memo",                         par.memo));
+               ("memo",                         par.memo)
+               ("relay",                        my_impl->relay));
 
       if ( ! actn.valid() ){
          fc_elog(logger,"get cash action failed");
@@ -1598,7 +1603,8 @@ namespace eosio { namespace ibc {
          ("anchor_block_num",             par.anchor_block_num)
          ("to",                           par.to)
          ("quantity",                     par.quantity)
-         ("memo",                         par.memo));
+         ("memo",                         par.memo)
+         ("relay",                        my_impl->relay));
 
       if ( ! actn.valid() ){
          fc_elog(logger,"cash: get action failed");
@@ -1653,7 +1659,8 @@ namespace eosio { namespace ibc {
       auto trx_id = params->at(index);
       auto actn = get_action( account, action_name, vector<permission_level>{{ my_impl->relay, config::active_name}}, mvo()
          ("peerchain_name", peerchain_name)
-         ("trx_id",         trx_id));
+         ("trx_id",         trx_id)
+         ("relay",          my_impl->relay));
 
       if ( ! actn.valid() ){
          fc_elog(logger,"newsection: get action failed");

@@ -157,6 +157,7 @@ namespace eosio { namespace ibc {
       name                                   to;      
       asset                                  quantity;
       string                                 memo;
+      name                                   relay;
    };
 
    struct cashconfirm_action_params {
