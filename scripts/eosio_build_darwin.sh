@@ -37,7 +37,7 @@ ensure-brew-packages "${REPO_ROOT}/scripts/eosio_build_darwin_deps"
 # CLANG Installation
 build-clang
 # BOOST Installation
-# ensure-boost
+ensure-boost
 # MONGO Installation
 if $INSTALL_MONGO; then
 	echo "${COLOR_CYAN}[Ensuring MongoDB installation]${COLOR_NC}"
