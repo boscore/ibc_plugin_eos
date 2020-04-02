@@ -110,6 +110,8 @@ public:
 
    get_account_ram_corrections_result  get_account_ram_corrections( const get_account_ram_corrections_params& params ) const;
 
+   void drop_all_unapplied_transactions();
+
 private:
    std::shared_ptr<class producer_plugin_impl> my;
 };

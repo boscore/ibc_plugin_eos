@@ -1345,6 +1345,10 @@ producer_plugin::get_account_ram_corrections( const get_account_ram_corrections_
    return result;
 }
 
+void producer_plugin::drop_all_unapplied_transactions(){
+   my->_unapplied_transactions.clear();
+}
+
 optional<fc::time_point> producer_plugin_impl::calculate_next_block_time(const account_name& producer_name, const block_timestamp_type& current_block_time) const {
    chain::controller& chain = chain_plug->chain();
    const auto& hbs = chain.head_block_state();
