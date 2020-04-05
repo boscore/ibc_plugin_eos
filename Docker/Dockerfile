@@ -5,7 +5,6 @@ ARG symbol=SYS
 RUN git clone -b $branch https://github.com/boscore/ibc_plugin_eos.git --recursive 
 
 WORKDIR /ibc_plugin_eos
-RUN git remote update
 RUN ./scripts/eosio_build.sh -s EOS -y -P \
 RUN ./scripts/eosio_install.sh
 
