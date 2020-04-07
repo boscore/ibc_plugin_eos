@@ -2819,6 +2819,7 @@ namespace eosio {
    }
 
    void connection::handle_message( const sync_request_message& msg ) {
+      return;
       fc_dlog( logger, "peer requested ${start} to ${end}", ("start", msg.start_block)("end", msg.end_block) );
       if( msg.end_block == 0 ) {
          peer_requested.reset();
@@ -2837,6 +2838,7 @@ namespace eosio {
    }
 
    void connection::handle_message( packed_transaction_ptr trx ) {
+      return;
       const auto& tid = trx->id();
       peer_dlog( this, "received packed_transaction ${id}", ("id", tid) );
 
