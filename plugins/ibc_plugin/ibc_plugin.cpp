@@ -2718,7 +2718,9 @@ namespace eosio { namespace ibc {
          ++check_num;
          uint32_t tmp_end_num = std::min( start_num + MaxSendSectionLength - 1, end_num );
          while ( check_num <= tmp_end_num ){
-            ret_msg.headers.push_back( *(chain_plug->chain().fetch_block_by_number( check_num )) );
+            auto shr_ptr = chain_plug->chain().fetch_block_by_number( check_num );
+            if ( ! shr_ptr ){ fc_elog(logger,"fatal internal error, block ${n} not exist", ("n", check_num)); }
+            ret_msg.headers.push_back( * shr_ptr );
             check_num += 1;
          }
          peer_ilog(c,"sending lwc_section_data_message, range [${from},${to}], merkle nodes ${nodes}", ("from",start_num)("to",tmp_end_num)("nodes",ret_msg.blockroot_merkle._active_nodes.size()));
@@ -2854,6 +2856,7 @@ namespace eosio { namespace ibc {
          if ( check_num > lib_block_num ){ break;}
          fc_ilog(logger,"check_num = ${n}", ("n",check_num));
          signed_block_ptr sbp = chain_plug->chain().fetch_block_by_number( check_num );
+         if ( sbp == signed_block_ptr() ){ fc_elog(logger,"block ${n} not exist", ("n", check_num)); return; }
          for ( auto& ext : sbp->block_extensions ){
             if ( ext.first == 0x1 && ext.second.size()>0 ){
                content = ext.second;
@@ -3125,12 +3128,18 @@ namespace eosio { namespace ibc {
 
    uint32_t ibc_plugin_impl::get_lib_tslot(){
       auto block_num = chain_plug->chain().last_irreversible_block_num();
-      return chain_plug->chain().fetch_block_by_number( block_num )->timestamp.slot;
+
+      auto shr_ptr = chain_plug->chain().fetch_block_by_number( block_num );
+      if ( ! shr_ptr ){ fc_elog(logger,"fatal error, block ${n} not exist", ("n", block_num)); return 0; }
+      return shr_ptr->timestamp.slot;
    }
 
    uint32_t ibc_plugin_impl::get_head_tslot(){
       auto block_num = chain_plug->chain().fork_db_head_block_num();
-      return chain_plug->chain().fetch_block_by_number( block_num )->timestamp.slot;
+
+      auto shr_ptr = chain_plug->chain().fetch_block_by_number( block_num );
+      if ( ! shr_ptr ){ fc_elog(logger,"fatal error, block ${n} not exist", ("n", block_num)); return 0; }
+      return shr_ptr->timestamp.slot;
    }
 
    lwc_section_type ibc_plugin_impl::sum_received_lwcls_info() {
@@ -3639,7 +3648,10 @@ namespace eosio { namespace ibc {
 
    uint32_t ibc_plugin_impl::get_block_num_by_time_slot( uint32_t block_time_slot ){
       auto head_num = chain_plug->chain().fork_db_head_block_num();
-      auto head_slot = chain_plug->chain().fetch_block_by_number(head_num)->timestamp.slot;
+
+      auto shr_ptr = chain_plug->chain().fetch_block_by_number( head_num );
+      if ( ! shr_ptr ){ fc_elog(logger,"fatal error, block ${n} not exist", ("n", head_num)); return 0; }
+      auto head_slot = shr_ptr->timestamp.slot;
 
       if ( head_slot < block_time_slot ){
          fc_elog(logger,"unknown block_time_slot" );
@@ -3649,10 +3661,16 @@ namespace eosio { namespace ibc {
       // get block number from block_time_slot
       uint32_t diff = head_slot - block_time_slot;
       uint32_t check_num = head_num > diff ? head_num - diff : 1;
-      uint32_t check_slot = chain_plug->chain().fetch_block_by_number(check_num)->timestamp.slot;
+
+      auto shr_ptr2 = chain_plug->chain().fetch_block_by_number(check_num);
+      if ( ! shr_ptr2 ){ fc_elog(logger,"block ${n} not exist", ("n", check_num)); return 0; }
+      uint32_t check_slot = shr_ptr2->timestamp.slot;
+
       while ( check_slot < block_time_slot ){
          check_num += 1;
-         check_slot = chain_plug->chain().fetch_block_by_number(check_num)->timestamp.slot;
+         auto shr_ptr3 = chain_plug->chain().fetch_block_by_number(check_num);
+         if ( ! shr_ptr3 ){ fc_elog(logger,"block ${n} not exist", ("n", check_num)); return 0; }
+         check_slot = shr_ptr3->timestamp.slot;
       }
 
       if ( check_slot != block_time_slot ){
@@ -3666,6 +3684,10 @@ namespace eosio { namespace ibc {
    optional<ibc_trx_rich_info> ibc_plugin_impl::get_ibc_trx_rich_info( uint32_t block_time_slot, transaction_id_type trx_id, uint64_t table_id ){
 
       uint32_t trx_block_num = get_block_num_by_time_slot( block_time_slot );
+      if ( trx_block_num == 0 ){
+         fc_elog(logger,"block of time slot: ${n} not exist", ("n", block_time_slot));
+         return optional<ibc_trx_rich_info>();
+      }
 
       ibc_trx_rich_info trx_info;
       trx_info.table_id    = table_id;
@@ -3674,6 +3696,11 @@ namespace eosio { namespace ibc {
 
       // get trx merkle path
       auto blk_ptr =  chain_plug->chain().fetch_block_by_number( trx_info.block_num );
+      if ( ! blk_ptr ){
+         fc_elog(logger,"block ${n} not exist", ("n", trx_info.block_num));
+         return optional<ibc_trx_rich_info>();
+      }
+
       std::vector<digest_type>            trx_digests;
       std::vector<transaction_id_type>    trx_ids;
       std::vector<char>                   packed_trx_receipt;
