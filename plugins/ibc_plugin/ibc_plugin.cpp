@@ -3222,7 +3222,14 @@ namespace eosio { namespace ibc {
       };
 
       while ( check_block_num < lib_block_num ){
-         auto np_opt = get_block_ptr(check_block_num)->new_producers;
+         auto sh_ptr = get_block_ptr(check_block_num);
+         if ( ! sh_ptr ){
+            fc_dlog(logger,"there is no block ${n} data",("n",check_block_num));
+            ++check_block_num;
+            continue;
+         }
+
+         auto np_opt = sh_ptr->new_producers;
          if ( np_opt.valid() && np_opt->producers.size() > 0 ){
             msg.new_producers_block_num = check_block_num - 1;
             fc_ilog(logger,"find new_producers_block_num ${n} < ---- new producers ---- >",("n",msg.new_producers_block_num));
