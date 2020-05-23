@@ -1086,13 +1086,13 @@ namespace eosio { namespace ibc {
       memo = trim( memo );
 
       // --- get chain name and notes ---
-      pos = memo.find(" ");
+      pos = memo.find_first_not_of("abcdefghijklmnopqrstuvwxyz");
       if ( pos == std::string::npos ){
          info.chain = name( memo );
          info.notes = "";
       } else {
          info.chain = name( memo.substr(0,pos) );
-         info.notes = memo.substr( pos + 1 );
+         info.notes = memo.substr( pos );
          info.notes = trim( info.notes );
       }
 
@@ -4089,7 +4089,9 @@ namespace eosio { namespace ibc {
          }
          if ( times <= 3 ){
             fc_ilog(logger,"---------orig_trxs_to_push to push size ${n}, retry times ${try}",("n",to_push.size())("try",times));
-            token_contract->push_cash_trxs( to_push, range.second + 1 );
+            try {
+               token_contract->push_cash_trxs( to_push, range.second + 1 );
+            } FC_LOG_AND_DROP()
          }
       }
 
@@ -4127,7 +4129,9 @@ namespace eosio { namespace ibc {
             to_push = cash_trxs_to_push;
          }
          fc_ilog(logger,"---------cash_trxs_to_push to push size ${n}",("n",to_push.size()));
-         token_contract->push_cashconfirm_trxs( to_push, last_cash_seq_num + 1 );
+         try {
+            token_contract->push_cashconfirm_trxs( to_push, last_cash_seq_num + 1 );
+         } FC_LOG_AND_DROP()
          return;
       }
 
@@ -4157,6 +4161,7 @@ namespace eosio { namespace ibc {
 
       // --- summary ---
       if ( ! (reached_min_length && orig_b && cash_b ) ){
+         idump((reached_min_length)(orig_b)(cash_b));
          return;
       }
 
