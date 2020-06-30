@@ -3230,22 +3230,36 @@ namespace eosio { namespace ibc {
       auto get_block_ptr = [=]( uint32_t num ) -> signed_block_ptr {
          return chain_plug->chain().fetch_block_by_number(num);
       };
+      
+      bool wtmsig_activated = chain_plug->chain().is_builtin_activated( builtin_protocol_feature_t::wtmsig_block_signatures );
 
       while ( check_block_num < lib_block_num ){
-         auto sh_ptr = get_block_ptr(check_block_num);
-         if ( ! sh_ptr ){
+         auto bk_ptr = get_block_ptr(check_block_num);
+         if ( ! bk_ptr ){
             fc_dlog(logger,"there is no block ${n} data",("n",check_block_num));
             ++check_block_num;
             continue;
          }
 
-         auto np_opt = sh_ptr->new_producers;
-         if ( np_opt.valid() && np_opt->producers.size() > 0 ){
-            msg.new_producers_block_num = check_block_num - 1;
-            fc_ilog(logger,"find new_producers_block_num ${n} < ---- new producers ---- >",("n",msg.new_producers_block_num));
-            return;
+         if ( ! wtmsig_activated ){
+            auto np_opt = bk_ptr->new_producers;
+            if ( np_opt.valid() && np_opt->producers.size() > 0 ){
+               msg.new_producers_block_num = check_block_num - 1;
+               fc_ilog(logger,"find new_producers_block_num ${n} < ---- new producers ---- >",("n",msg.new_producers_block_num));
+               return;
+            }
+            ++check_block_num;
          }
-         ++check_block_num;
+         else {
+            auto exts = bk_ptr->validate_and_extract_header_extensions();
+            if ( exts.count(producer_schedule_change_extension::extension_id()) > 0 ) {
+               // const auto& new_producer_schedule = exts.lower_bound(producer_schedule_change_extension::extension_id())->second.get<producer_schedule_change_extension>();
+               msg.new_producers_block_num = check_block_num - 1;
+               fc_ilog(logger,"find new_producers_block_num ${n} < ---- new producers ---- >",("n",msg.new_producers_block_num));
+               return;
+            }
+            ++check_block_num;
+         }
       }
    }
 
