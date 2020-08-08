@@ -180,6 +180,22 @@ namespace eosio { namespace ibc {
       string   notes;
    };
 
+   // ---- proxy related ----
+   struct proxy_trx_info {
+      uint64_t             id;
+      transaction_id_type  orig_trx_id;
+      uint64_t             block_time_slot;
+      name                 token_contract;
+      name                 orig_from;
+      name                 to;
+      asset                quantity;
+      string               orig_memo;
+   };
+
+   struct proxy_struct {
+      name proxy;
+   };
+
 }}
 
 FC_REFLECT( eosio::ibc::connection_status, (peer)(connecting)(syncing)(last_handshake) )
@@ -207,3 +223,5 @@ FC_REFLECT( eosio::ibc::cashconfirm_action_params, (from_chain)(cash_trx_id)(cas
             (cash_trx_merkle_path)(cash_trx_block_num)(cash_trx_block_header)(cash_trx_block_id_merkle_path)
             (anchor_block_num)(orig_trx_id) )
 FC_REFLECT( eosio::ibc::memo_info_type, (receiver)(chain)(notes) )
+FC_REFLECT( eosio::ibc::proxy_trx_info, (id)(orig_trx_id)(block_time_slot)(token_contract)(orig_from)(to)(quantity)(orig_memo) )
+FC_REFLECT( eosio::ibc::proxy_struct, (proxy))
